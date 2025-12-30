@@ -1,0 +1,133 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: hsl(0, 0%, 100%);
+  --foreground: hsl(20, 14.3%, 4.1%);
+  --muted: hsl(60, 4.8%, 95.9%);
+  --muted-foreground: hsl(25, 5.3%, 44.7%);
+  --popover: hsl(0, 0%, 100%);
+  --popover-foreground: hsl(20, 14.3%, 4.1%);
+  --card: hsl(0, 0%, 100%);
+  --card-foreground: hsl(20, 14.3%, 4.1%);
+  --border: hsl(20, 5.9%, 90%);
+  --input: hsl(20, 5.9%, 90%);
+  --primary: hsl(207, 90%, 54%);
+  --primary-foreground: hsl(211, 100%, 99%);
+  --secondary: hsl(60, 4.8%, 95.9%);
+  --secondary-foreground: hsl(24, 9.8%, 10%);
+  --accent: hsl(60, 4.8%, 95.9%);
+  --accent-foreground: hsl(24, 9.8%, 10%);
+  --destructive: hsl(0, 84.2%, 60.2%);
+  --destructive-foreground: hsl(60, 9.1%, 97.8%);
+  --ring: hsl(20, 14.3%, 4.1%);
+  --radius: 0.5rem;
+  
+  /* Custom ChipCore colors */
+  --blue-gradient-start: hsl(210, 83%, 53%);
+  --blue-gradient-end: hsl(207, 90%, 61%);
+  --orange-gradient-start: hsl(33, 100%, 50%);
+  --orange-gradient-end: hsl(36, 100%, 60%);
+  --green-gradient-start: hsl(142, 76%, 36%);
+  --green-gradient-end: hsl(142, 70%, 45%);
+  --purple-gradient-start: hsl(262, 83%, 58%);
+  --purple-gradient-end: hsl(262, 90%, 65%);
+}
+
+.dark {
+  --background: hsl(240, 10%, 3.9%);
+  --foreground: hsl(0, 0%, 98%);
+  --muted: hsl(240, 3.7%, 15.9%);
+  --muted-foreground: hsl(240, 5%, 64.9%);
+  --popover: hsl(240, 10%, 3.9%);
+  --popover-foreground: hsl(0, 0%, 98%);
+  --card: hsl(240, 10%, 3.9%);
+  --card-foreground: hsl(0, 0%, 98%);
+  --border: hsl(240, 3.7%, 15.9%);
+  --input: hsl(240, 3.7%, 15.9%);
+  --primary: hsl(207, 90%, 54%);
+  --primary-foreground: hsl(211, 100%, 99%);
+  --secondary: hsl(240, 3.7%, 15.9%);
+  --secondary-foreground: hsl(0, 0%, 98%);
+  --accent: hsl(240, 3.7%, 15.9%);
+  --accent-foreground: hsl(0, 0%, 98%);
+  --destructive: hsl(0, 62.8%, 30.6%);
+  --destructive-foreground: hsl(0, 0%, 98%);
+  --ring: hsl(240, 4.9%, 83.9%);
+  --radius: 0.5rem;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+}
+
+@layer utilities {
+  .gradient-text-blue {
+    background: linear-gradient(135deg, var(--blue-gradient-start), var(--blue-gradient-end));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  
+  .gradient-text-orange {
+    background: linear-gradient(135deg, var(--orange-gradient-start), var(--orange-gradient-end));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  
+  .gradient-bg-blue {
+    background: linear-gradient(135deg, var(--blue-gradient-start), var(--blue-gradient-end));
+  }
+
+  .gradient-bg-orange {
+    background: linear-gradient(135deg, var(--orange-gradient-start), var(--orange-gradient-end));
+  }
+
+  .gradient-bg-green {
+    background: linear-gradient(135deg, var(--green-gradient-start), var(--green-gradient-end));
+  }
+
+  .gradient-bg-purple {
+    background: linear-gradient(135deg, var(--purple-gradient-start), var(--purple-gradient-end));
+  }
+  
+  .hero-bg {
+    background: linear-gradient(135deg, hsl(210, 83%, 53%, 0.05), hsl(33, 100%, 50%, 0.05)),
+                url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800"><defs><pattern id="circuit" x="0" y="0" width="120" height="120" patternUnits="userSpaceOnUse"><g stroke="%23359ff0" stroke-width="1" fill="none" opacity="0.3"><rect x="10" y="10" width="100" height="100" rx="5"/><circle cx="30" cy="30" r="8"/><circle cx="90" cy="30" r="8"/><circle cx="30" cy="90" r="8"/><circle cx="90" cy="90" r="8"/><path d="M30 30 L90 30 M30 90 L90 90 M30 30 L30 90 M90 30 L90 90"/><path d="M38 30 L45 23 L52 30 L45 37 Z" fill="%23359ff0"/><path d="M75 45 L82 38 L89 45 L82 52 Z" fill="%23ff9800"/></g><g stroke="%23ff9800" stroke-width="0.8" fill="none" opacity="0.25"><path d="M60 10 L60 110 M10 60 L110 60"/><circle cx="60" cy="35" r="4" fill="%23ff9800"/><circle cx="60" cy="85" r="4" fill="%23359ff0"/></g></pattern></defs><rect width="100%" height="100%" fill="url(%23circuit)"/></svg>');
+  }
+}
+
+@keyframes float {
+  0%, 100% { 
+    transform: translateY(0px); 
+  }
+  50% { 
+    transform: translateY(-20px); 
+  }
+}
+
+@keyframes pulse-subtle {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}

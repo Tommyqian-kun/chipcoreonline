@@ -1,0 +1,53 @@
+# LogicCore EDA Tool Service - Python Dependencies
+# Generated for Linux production deployment
+# Python 3.11+ required
+#
+# IMPORTANT: System packages required (install via yum/apt):
+# - python3.11-tkinter (Rocky Linux/CentOS: yum install python3.11-tkinter)
+# - python3-tk (Ubuntu/Debian: apt install python3-tk)
+
+# Core Python packages
+certifi==2025.8.3
+charset-normalizer==3.4.3
+idna==3.10
+urllib3==2.5.0
+requests==2.32.5
+six==1.17.0
+typing_extensions==4.15.0
+
+# Docker integration
+docker==7.1.0
+
+# Database and ORM
+psycopg2-binary==2.9.10
+SQLAlchemy==2.0.43
+
+# Redis client
+redis==6.4.0
+
+# Environment configuration
+python-dotenv==1.1.1
+
+# Excel file processing
+openpyxl==3.1.5
+et_xmlfile==2.0.0
+
+# Data processing
+pandas==2.3.2
+numpy==2.3.3
+python-dateutil==2.9.0.post0
+pytz==2025.2
+tzdata==2025.2
+
+# YAML processing
+PyYAML==6.0.2
+
+tkinter==8.6
+
+# Math and scientific computing
+greenlet==3.2.4
+
+# Build tools (included for completeness)
+setuptools==80.9.0
+wheel==0.45.1
+pip==25.2

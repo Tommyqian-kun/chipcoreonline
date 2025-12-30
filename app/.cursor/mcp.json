@@ -1,0 +1,19 @@
+{
+    "mcpServers": {
+      "filesystem": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "E:\\stone\\work\\webapp\\onlineictech\\LogicCore"
+        ]
+      },
+      "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+       "@executeautomation/playwright-mcp-server"
+      ]
+    }
+    }
+  }

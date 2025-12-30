@@ -1,0 +1,168 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "E:\\stone\\work\\webapp\\onlineictech\\LogicCore"
+      ]
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "serena": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/oraios/serena",
+        "serena-mcp-server.exe"
+      ]
+    },
+    "context7": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ]
+    },
+    "deepwiki-sse": {
+      "url": "https://mcp.deepwiki.com/sse"
+    },
+    "time": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-time",
+        "--local-timezone=Asia/Shanghai"
+      ]
+    },
+    "huggingface-mcp-server": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "@smithery/cli@latest",
+        "run",
+        "@shreyaskarnik/huggingface-mcp-server",
+        "--key",
+        "57a1c2b1-c58e-4fd8-a157-18351cd88b13"
+      ]
+    },
+    "tavily-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "tavily-mcp"
+      ],
+      "env": {
+        "TAVILY_API_KEY": "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"
+      },
+      "disabled": false,
+      "autoApprove": []
+    },
+    "amap-maps-sse": {
+      "url": "https://mcp.amap.com/sse?key=9442d29cb0c2c050da76e80d1c1432d7"
+    },
+    "MiniMax": {
+      "command": "uvx",
+      "args": [
+        "minimax-mcp"
+      ],
+      "env": {
+        "MINIMAX_API_KEY": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJHcm91cE5hbWUiOiJ0b21teWt1biIsIlVzZXJOYW1lIjoidG9tbXlrdW4iLCJBY2NvdW50IjoiIiwiU3ViamVjdElEIjoiMTkzNTk0MjY0OTMyNDI1MDA2OSIsIlBob25lIjoiMTU4MjE1NzMzODYiLCJHcm91cElEIjoiMTkzNTk0MjY0OTMxNTg2MTQ2MSIsIlBhZ2VOYW1lIjoiIiwiTWFpbCI6IiIsIkNyZWF0ZVRpbWUiOiIyMDI1LTA2LTIzIDA4OjQ3OjA3IiwiVG9rZW5UeXBlIjoxLCJpc3MiOiJtaW5pbWF4In0.a4bSmob-uPcF92bEMnoNeelGh4i4oPq--KEYwnpaONaLAYPJRYE4019wRiiD4_lBiFKv6EDGE704Yg_siuBKiy2PBaL7uyKUVGxW_4B5adafuMy_64LwwVFbhA1gda-yPNBCi3aE2v_HJiQJjviAuUUV8WLZEbi4FlSu4IT02RiPVpIIRyMd8Ca2aQL7__In33IvCzmSPogm9cd1aR6RsB3EzI3XDxHdF_bj7_GeUznHVrrN79JmH22wUiRotQQ-2l2FHHUA0tOqLx_L_ZrXf_EloaZD48RBoT1rXC2LaTFDgyMVExXfQqlvKszmpw4pyL2Qu8-uot7iKwX6LXSJyw",
+        "MINIMAX_MCP_BASE_PATH": "E:\\stone\\lama\\mcpdata\\minimaxi",
+        "MINIMAX_API_HOST": "https://api.minimaxi.com",
+        "MINIMAX_API_RESOURCE_MODE": "<optional, [url|local], url is default, audio/image/video are downloaded locally or provided in URL format>"
+      }
+    },
+    "12306-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "12306-mcp"
+      ]
+    },
+    "OpenDeepWiki": {
+      "url": "https://opendeep.wiki/api/mcp?3b1b=AIDotNet&manim=OpenDeepWiki"
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+       "@executeautomation/playwright-mcp-server"
+      ]
+    },
+    "mcp-mermaid": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "mcp-mermaid"
+      ]
+    },
+    "excalidraw-mcp": {
+      "command": "npx",
+      "args": [
+        "-y", 
+       "excalidraw-mcp"
+      ]
+    },
+    "paper-search-mcp": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "@smithery/cli@latest",
+        "run",
+        "@openags/paper-search-mcp",
+        "--key",
+        "57a1c2b1-c58e-4fd8-a157-18351cd88b13"
+      ]
+    },
+    "arxiv-mcp-server": {
+      "command": "uv",
+      "args": [
+        "tool",
+        "run",
+        "arxiv-mcp-server",
+        "--storage-path",
+        "C:\\Users\\aic_q\\Documents/arxiv"
+      ]
+    },
+    "markdownify": {
+      "command": "node",
+      "args": [
+        "E:\\stone\\work\\smalltool\\mcpcollect\\markdownify-mcp\\dist/index.js"
+      ],
+        "env": {
+        "UV_PATH": "C:\\Users\\aic_q\\AppData\\Local\\uv\\bin\\uv.exe"
+      }
+    },
+    "task-master-ai": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "--package=task-master-ai",
+        "task-master-ai"
+      ],
+      "env": {
+        "ANTHROPIC_API_KEY": "ANTHROPIC_API_KEY_HERE",
+        "PERPLEXITY_API_KEY": "PERPLEXITY_API_KEY_HERE",
+        "OPENAI_API_KEY": "OPENAI_API_KEY_HERE",
+        "GOOGLE_API_KEY": "GOOGLE_API_KEY_HERE",
+        "XAI_API_KEY": "XAI_API_KEY_HERE",
+        "OPENROUTER_API_KEY": "OPENROUTER_API_KEY_REDACTED",
+        "MISTRAL_API_KEY": "MISTRAL_API_KEY_HERE",
+        "AZURE_OPENAI_API_KEY": "AZURE_OPENAI_API_KEY_HERE",
+        "OLLAMA_API_KEY": "OLLAMA_API_KEY_HERE"
+      }
+    }
+  }
+}

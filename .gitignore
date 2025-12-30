@@ -1,0 +1,59 @@
+# 环境依赖
+node_modules/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# IDE和编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 日志文件
+*.log
+
+
+# 环境变量文件
+.env
+.env.local
+.env.*.local
+
+ # 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+prisma/migrations/
+
+# 临时文件
+
+*.tmp
+
+ # 测试覆盖率
+coverage/
+.nyc_output/
+
+ # 忽略整个目录
+backups/
+scripts/
+test/
+
+ # 忽略docker大文件但保留目录结构
+docker/images/sdc/logiccore_sdc*
+docker/images/upf/logiccore_upf*
+
+ # OSS下载缓存
+/opt/logiccore/temp/
+
+ # Docker相关
+docker-compose.override.yml

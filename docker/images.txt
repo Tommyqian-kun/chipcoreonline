@@ -1,0 +1,18 @@
+# EDA工具镜像列表
+# 用于ECS Only模式的本地镜像管理
+# 格式: repository:tag
+
+# SDC生成器工具镜像
+logiccore/sdc-generator:latest
+logiccore/sdc-generator:v1.0
+
+# UPF生成器工具镜像  
+logiccore/upf-generator:latest
+logiccore/upf-generator:v1.0
+
+# 基础镜像
+ubuntu:20.04
+python:3.9-slim
+
+# 开发和测试镜像
+logiccore/test-runner:latest

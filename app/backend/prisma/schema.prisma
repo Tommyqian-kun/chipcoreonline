@@ -1,0 +1,282 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 String        @id @default(cuid())
+  email              String        @unique
+  password           String
+  name               String?
+  avatar             String?
+  isVerified         Boolean       @default(false)
+  role               Role          @default(USER)
+  verificationToken  String?       @unique
+  resetPasswordToken String?       @unique
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  auditLogs          AuditLog[]
+  orders             Order[]
+  subscription       Subscription?
+  tasks              Task[]
+}
+
+model Plan {
+  id            String         @id @default(cuid())
+  name          String         @unique
+  description   String?
+  priceMonth    Decimal        @map("price_month") @db.Decimal(10, 2)
+  priceYear     Decimal        @map("price_year") @db.Decimal(10, 2)
+  features      Json
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  orders        Order[]
+  subscriptions Subscription[]
+}
+
+model Tool {
+  id             String   @id @default(cuid())
+  name           String   @unique
+  description    String
+  inputSchema    Json
+  dockerImage    String
+  version        String
+  configTemplate Json?
+  isPublic       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  toolType       String   @default("sdcgen")
+  tasks          Task[]
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String
+  action    String
+  targetId  String
+  details   Json?
+  createdAt DateTime @default(now())
+  actor     User     @relation(fields: [actorId], references: [id])
+
+  @@index([actorId])
+  @@index([action])
+}
+
+model Task {
+  id                    String         @id @default(cuid())
+  userId                String
+  toolId                String
+  status                TaskStatus     @default(PENDING)
+  parameters            Json
+  inputFile             String?
+  outputFile            String?
+  logFile               String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  deploymentMode        String?        @default("ecs_only")
+  ecsInstanceId         String?
+  finishedAt            DateTime?
+  localStoragePath      String?
+  startedAt             DateTime?
+  containerStartedAt    DateTime? // 容器真正开始执行的时间（3分钟超时计算起点）
+  workerId              String?
+  errorMessage          String?
+  failureReason         String?
+  downloadStatus        DownloadStatus @default(NOT_DOWNLOADED)
+  downloadedAt          DateTime?
+  downloadTimeRemaining Int? // ECS Only模式下载倒计时（秒）
+  queuedAt              DateTime       @default(now())
+  timeoutAt             DateTime?
+  timeoutType           TimeoutType?   @default(NONE)
+  retryCount            Int            @default(0)
+  maxRetries            Int            @default(3)
+  originalTaskId        String? // 如果是重试任务，记录原始任务ID
+  progress              Int            @default(0) // 任务进度百分比 (0-100)
+  currentStep           String? // 当前执行步骤
+  stepStartedAt         DateTime? // 当前步骤开始时间
+  cleanedAt             DateTime? // 任务清理完成时间
+  tool                  Tool           @relation(fields: [toolId], references: [id])
+  user                  User           @relation(fields: [userId], references: [id])
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@index([toolId, status])
+  @@index([userId, status, createdAt])
+  @@index([deploymentMode, status])
+  @@index([downloadStatus])
+  @@index([timeoutType])
+  @@index([queuedAt])
+}
+
+model Order {
+  id            String        @id @default(cuid())
+  userId        String
+  planId        String
+  status        OrderStatus   @default(PENDING)
+  amount        Decimal       @db.Decimal(10, 2)
+  paymentMethod PaymentMethod
+  paymentId     String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  plan          Plan          @relation(fields: [planId], references: [id])
+  user          User          @relation(fields: [userId], references: [id])
+  subscription  Subscription?
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@index([paymentMethod, status])
+  @@index([userId, status, createdAt])
+}
+
+model Subscription {
+  id        String             @id @default(cuid())
+  userId    String             @unique
+  planId    String
+  orderId   String?            @unique
+  status    SubscriptionStatus @default(ACTIVE)
+  startDate DateTime
+  endDate   DateTime
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  order     Order?             @relation(fields: [orderId], references: [id])
+  plan      Plan               @relation(fields: [planId], references: [id])
+  user      User               @relation(fields: [userId], references: [id])
+
+  @@index([status, endDate])
+  @@index([userId, status])
+}
+
+model Feedback {
+  id        String         @id @default(cuid())
+  firstName String
+  lastName  String
+  email     String
+  message   String
+  status    FeedbackStatus @default(PENDING)
+  response  String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@index([status, createdAt])
+  @@index([email])
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum TaskStatus {
+  DRAFT           // 多页面交互模式：用户正在填写需求，不计入超时时间
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+  QUEUE_TIMEOUT
+  EXECUTION_TIMEOUT
+}
+
+enum DownloadStatus {
+  NOT_DOWNLOADED
+  AVAILABLE
+  DOWNLOADED
+  EXPIRED
+}
+
+enum TimeoutType {
+  NONE
+  QUEUE_TIMEOUT
+  EXECUTION_TIMEOUT
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELED
+}
+
+enum PaymentMethod {
+  WECHAT
+  ALIPAY
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  EXPIRED
+}
+
+enum FeedbackStatus {
+  PENDING
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+// 多页面交互功能的数据库模型
+model Sheet {
+  id           String      @id @default(cuid())
+  toolType     String      @map("tool_type")
+  sheetName    String      @map("sheet_name")
+  displayOrder Int         @map("display_order")
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  tables       Table[]
+  TableData    TableData[]
+
+  @@unique([toolType, sheetName])
+  @@index([toolType])
+  @@map("sheets")
+}
+
+model Table {
+  id            String      @id @default(cuid())
+  sheetId       String      @map("sheet_id")
+  toolType      String      @map("tool_type")
+  tableName     String      @map("table_name")
+  columnsSchema Json        @map("columns_schema")
+  displayOrder  Int         @map("display_order")
+  taskId        String?     @map("task_id")        // 新增：任务级别隔离
+  isTemplate    Boolean     @default(false)       // 新增：标记是否为基础模板
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  sheet         Sheet       @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  tableData     TableData[]
+
+  @@unique([sheetId, tableName, taskId])  // 修改：添加taskId到唯一约束
+  @@index([toolType])
+  @@index([sheetId])
+  @@index([taskId])                       // 新增：taskId索引
+  @@map("tables")
+}
+
+model TableData {
+  id               String   @id @default(cuid())
+  userId           String   @map("user_id")
+  taskId           String   @map("task_id")
+  tableId          String   @map("table_id")
+  sheetId          String   @map("sheet_id")
+  rowNumber        Int      @map("row_number")
+  rowData          Json     @map("row_data")
+  dropdownData     Json?    @map("dropdown_data") // 存储每个单元格的下拉数据选项
+  validationData   Json?    @map("validation_data") // 存储数据验证规则
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  table            Table    @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  sheet            Sheet    @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, tableId, rowNumber])
+  @@index([userId, taskId])
+  @@index([taskId])
+  @@index([tableId])
+  @@index([sheetId])
+  @@map("table_data")
+}

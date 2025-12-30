@@ -1,0 +1,48 @@
+{
+  "name": "chipcore-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:worker": "cd backend && npm run dev:worker",
+    "build": "npm run build:frontend && npm run build:backend",
+    "build:frontend": "cd frontend && npm run build",
+    "build:backend": "cd backend && npm run build",
+    "start": "concurrently \"npm run start:backend\" \"npm run start:frontend\"",
+    "start:frontend": "cd frontend && npm run preview",
+    "start:backend": "cd backend && npm run start:backend",
+    "check": "npm run check:frontend && npm run check:backend",
+    "check:frontend": "cd frontend && npm run check",
+    "check:backend": "cd backend && npm run check",
+    "db:generate": "cd backend && npm run db:generate",
+    "db:push": "cd backend && npm run db:push",
+    "db:migrate": "cd backend && npm run db:migrate",
+    "db:studio": "cd backend && npm run db:studio",
+    "db:seed": "cd backend && npm run db:seed",
+    "install:all": "npm install && cd frontend && npm install && cd ../backend && npm install"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.9",
+    "@types/multer": "^1.4.13",
+    "concurrently": "^8.2.2"
+  },
+  "optionalDependencies": {
+    "bufferutil": "^4.0.8"
+  },
+  "dependencies": {
+    "@types/socket.io": "^3.0.1",
+    "alipay-sdk": "^4.14.0",
+    "axios": "^1.10.0",
+    "axios-cookiejar-support": "^6.0.3",
+    "cookie-parser": "^1.4.7",
+    "socket.io": "^4.8.1",
+    "tough-cookie": "^5.1.2"
+  }
+}

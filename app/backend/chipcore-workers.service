@@ -1,0 +1,53 @@
+[Unit]
+Description=ChipCore Task Workers
+Documentation=https://github.com/your-org/chipcore
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+Requires=network.target
+
+[Service]
+Type=simple
+User=chipcore
+Group=chipcore
+WorkingDirectory=/opt/chipcore/app/backend
+ExecStart=/usr/bin/python3 start_workers.py
+ExecReload=/bin/kill -HUP $MAINPID
+ExecStop=/bin/kill -TERM $MAINPID
+
+# 重启策略
+Restart=always
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=3
+
+# 环境变量
+Environment=NODE_ENV=production  # 注释掉，让.env文件控制环境
+Environment=PYTHONPATH=/opt/chipcore/app/backend
+EnvironmentFile=-/opt/chipcore/app/backend/.env
+
+# 资源限制
+LimitNOFILE=65536
+LimitNPROC=32768
+
+# 安全设置
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/chipcore/data
+ReadWritePaths=/tmp
+ReadWritePaths=/var/log/chipcore
+
+# 日志设置
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=chipcore-workers
+
+# 进程管理
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+Alias=chipcore.service
