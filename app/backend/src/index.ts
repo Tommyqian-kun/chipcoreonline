@@ -352,6 +352,19 @@ async function startServer() {
     logger.error({ error }, '❌ Failed to start task log cleanup service');
   }
 
+  // 【新增】Initialize user concurrent state sync
+  // 从数据库同步活跃任务的用户并发状态到Redis
+  try {
+    const { userConcurrentCheck } = await import('./services/user-concurrent-check.service');
+    const syncResult = await userConcurrentCheck.syncFromDatabase();
+    logger.info({
+      syncedUsers: syncResult.syncedUsers,
+      totalSlotsSynced: syncResult.totalSlotsSynced
+    }, '✅ User concurrent state sync completed');
+  } catch (error) {
+    logger.error({ error }, '❌ Failed to sync user concurrent state');
+  }
+
   // --- Global Error Handler ---
   // This must be the last middleware
   app.use(errorHandler);

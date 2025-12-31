@@ -322,6 +322,18 @@ export const initializeTask = async (req: Request, res: Response) => {
       cleanupTaskLogger(taskId);
     }
 
+    // 【新增】DRAFT状态的任务不应占用并发槽位，立即释放
+    // 订阅中间件在initialize时预留了槽位，但DRAFT任务还未真正执行
+    // 真正的并发检查应该在submitTask时进行
+    try {
+      const { userConcurrentCheck } = await import('../services/user-concurrent-check.service');
+      await userConcurrentCheck.releaseConcurrentSlot(userId);
+      console.log(`✅ [UPF-THRPAGES] DRAFT任务不占用并发槽位，已释放: 用户=${userId}, 任务=${taskId}`);
+    } catch (releaseError) {
+      console.error(`⚠️ [UPF-THRPAGES] 释放DRAFT任务并发槽位失败:`, releaseError);
+      // 不影响主流程，继续返回成功
+    }
+
     res.json({
       success: true,
       message: '任务初始化成功',
@@ -337,6 +349,7 @@ export const initializeTask = async (req: Request, res: Response) => {
     });
 
   } catch (error) {
+    // 如果初始化失败，槽位会被订阅中间件的异常处理逻辑自动释放
     if (taskLogger) {
       console.error('初始化任务失败:', error);
       taskLogger.logError('初始化任务失败', error);
@@ -618,9 +631,14 @@ export const checkTaskData = async (req: Request, res: Response) => {
 
 /**
  * 提交任务执行
+ *
+ * 【重要】这是真正执行任务的时机，需要检查并发限制
+ * initializeTask只是创建DRAFT草稿，不占用并发槽位
+ * submitTask才是真正执行，此时应该检查和预留并发槽位
  */
 export const submitTask = async (req: Request, res: Response) => {
   let operationLogger: any = null;
+  let slotReserved = false; // 标记是否预留了并发槽位
 
   try {
     const { taskId } = req.params;
@@ -633,6 +651,36 @@ export const submitTask = async (req: Request, res: Response) => {
     await operationLogger.runWithInterceptedConsole(async () => {
       operationLogger.stepStart('INIT', `开始UPF工具任务提交: 任务=${taskId}, 用户=${userId}`);
 
+      // 【新增】获取用户订阅信息，确定并发限制
+      const subscription = await prisma.subscription.findFirst({
+        where: {
+          userId: userId,
+          status: 'ACTIVE',
+          endDate: { gt: new Date() }
+        },
+        include: { plan: true }
+      });
+
+      const userType = subscription ? 'PROFESSIONAL' : 'FREE';
+      const maxConcurrentTasks = userType === 'PROFESSIONAL' ? 5 : 3;
+
+      // 【新增】原子性并发检查和槽位预留
+      operationLogger.stepStart('CONCURRENT_CHECK', '检查并发限制并预留槽位');
+      const { userConcurrentCheck } = await import('../services/user-concurrent-check.service');
+      const concurrentCheckResult = await userConcurrentCheck.atomicCheckAndReserveConcurrentSlot(
+        userId,
+        maxConcurrentTasks
+      );
+
+      if (!concurrentCheckResult.allowed) {
+        operationLogger.stepFailed('CONCURRENT_CHECK', `并发任务数超限: ${concurrentCheckResult.currentCount}/${maxConcurrentTasks}`);
+        throw new Error(`当前系统繁忙，您已有${concurrentCheckResult.currentCount}个任务正在处理，最多同时执行${maxConcurrentTasks}个任务。请稍后再试。`);
+      }
+
+      slotReserved = true; // 标记槽位已预留
+      operationLogger.stepComplete('CONCURRENT_CHECK', `并发检查通过，当前任务数: ${concurrentCheckResult.currentCount}`);
+      console.log(`✅ [UPF-THRPAGES] 并发检查通过: 用户=${userId}, 当前任务数=${concurrentCheckResult.currentCount}, 限制=${maxConcurrentTasks}`);
+
       // 验证任务权限
       operationLogger.stepStart('AUTH', '验证任务权限');
       const task = await prisma.task.findFirst({
@@ -641,7 +689,7 @@ export const submitTask = async (req: Request, res: Response) => {
 
       if (!task) {
         operationLogger.stepFailed('AUTH', '任务未找到或无权限访问');
-        return res.status(404).json({ error: '任务未找到或无权限访问' });
+        throw new Error('任务未找到或无权限访问');
       }
 
       operationLogger.stepComplete('AUTH', '任务权限验证通过');
@@ -669,6 +717,9 @@ export const submitTask = async (req: Request, res: Response) => {
       });
       operationLogger.stepComplete('STATUS', '任务状态更新完成');
       console.log(`✅ [UPF-THRPAGES] 任务状态更新完成:`, { taskId, status: 'PENDING' });
+
+      // 标记任务提交成功，槽位保持预留状态（将在任务完成时释放）
+      slotReserved = false;
     });
 
     // 记录操作完成
@@ -690,16 +741,37 @@ export const submitTask = async (req: Request, res: Response) => {
     });
 
   } catch (error) {
+    // 【新增】如果提交失败且槽位已预留，需要释放槽位
+    if (slotReserved) {
+      try {
+        const { userConcurrentCheck } = await import('../services/user-concurrent-check.service');
+        await userConcurrentCheck.releaseConcurrentSlot(req.user?.id || '');
+        console.log(`✅ [UPF-THRPAGES] 提交失败，已释放并发槽位: 用户=${req.user?.id}`);
+      } catch (releaseError) {
+        console.error(`⚠️ [UPF-THRPAGES] 释放并发槽位失败:`, releaseError);
+      }
+    }
+
     // 记录操作失败
     if (operationLogger) {
       operationLogger.complete(false, `任务提交失败: ${error instanceof Error ? error.message : '未知错误'}`);
     }
 
     console.error('提交任务失败:', error);
-    res.status(500).json({
-      error: '提交任务失败',
-      details: error instanceof Error ? error.message : '未知错误'
-    });
+
+    // 返回适当的错误响应
+    const errorMessage = error instanceof Error ? error.message : '未知错误';
+    if (errorMessage.includes('并发') || errorMessage.includes('系统繁忙')) {
+      res.status(429).json({  // 429 Too Many Requests
+        error: errorMessage,
+        code: 'CONCURRENT_LIMIT_EXCEEDED'
+      });
+    } else {
+      res.status(500).json({
+        error: '提交任务失败',
+        details: errorMessage
+      });
+    }
   }
 };
 
