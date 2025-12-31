@@ -36,7 +36,6 @@ build/
 prisma/migrations/
 
 # 临时文件
-
 *.tmp
 
  # 测试覆盖率
