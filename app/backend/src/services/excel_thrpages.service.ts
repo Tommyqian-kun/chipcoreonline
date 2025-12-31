@@ -7,10 +7,8 @@ import ExcelJS from 'exceljs';
 import path from 'path';
 import fs from 'fs/promises';
 import crypto from 'crypto';
-import { PrismaClient } from '@prisma/client';
 import { logToTaskFile, logErrorToTaskFile, isLoggerInitialized } from '../utils/task-logger';
-
-const prisma = new PrismaClient();
+import { prisma } from '../utils/database';
 
 // 任务级别的文件操作锁
 const taskFileLocks = new Map<string, Promise<void>>();

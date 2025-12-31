@@ -39,6 +39,40 @@ logging.basicConfig(
 )
 logger = logging.getLogger('WorkerManager')
 
+# ========================================
+# 全局数据库连接池管理
+# ========================================
+_db_engine = None
+
+def get_database_engine():
+    """获取全局数据库连接池（单例模式）"""
+    global _db_engine
+    if _db_engine is None:
+        from sqlalchemy import create_engine
+        from sqlalchemy.pool import QueuePool
+
+        database_url = os.getenv('DATABASE_URL')
+
+        # 从环境变量读取连接池配置
+        # 与TypeScript端的Prisma配置保持一致
+        db_pool_size = int(os.getenv('DB_POOL_SIZE', '5'))           # 基础连接池大小
+        db_max_overflow = int(os.getenv('DB_MAX_OVERFLOW', '10'))    # 最大溢出连接数
+        db_pool_timeout = int(os.getenv('DB_POOL_TIMEOUT', '30'))    # 获取连接超时（秒）
+        db_pool_recycle = int(os.getenv('DB_POOL_RECYCLE', '3600'))  # 连接回收时间（秒）
+
+        _db_engine = create_engine(
+            database_url,
+            poolclass=QueuePool,
+            pool_size=db_pool_size,
+            max_overflow=db_max_overflow,
+            pool_timeout=db_pool_timeout,
+            pool_recycle=db_pool_recycle,
+            pool_pre_ping=True,  # 连接前检查有效性
+            echo=False  # 不打印SQL日志
+        )
+        logger.info(f"Database connection pool initialized: pool_size={db_pool_size}, max_overflow={db_max_overflow}")
+    return _db_engine
+
 
 def worker_main_loop_static(worker_id: int):
     """静态Worker主循环函数 - 避免序列化问题"""
@@ -120,11 +154,10 @@ class QueueTimeoutCleaner:
                         if task_id:
                             # 从数据库获取任务创建时间
                             try:
-                                from sqlalchemy import create_engine, text
-                                from datetime import datetime
+                                from sqlalchemy import text
 
-                                database_url = os.getenv('DATABASE_URL')
-                                engine = create_engine(database_url)
+                                # 使用全局连接池而不是每次创建新连接
+                                engine = get_database_engine()
 
                                 with engine.connect() as conn:
                                     result = conn.execute(

@@ -1,12 +1,12 @@
 import { prisma } from '../utils/database';
 import logger from '../config/logger';
+import { redisPool } from './redis-pool.service';
 
 /**
  * Redis队列清理服务
  * 负责清理超时任务，维护Redis队列和active_task_ids的一致性
  */
 export class RedisQueueCleanupService {
-  private redisPool: any;
   private readonly QUEUE_WAIT_TIMEOUT_MINUTES: number;
   private readonly CONTAINER_EXECUTION_TIMEOUT_MINUTES: number;
   private readonly CLEANUP_INTERVAL_MINUTES: number;
@@ -16,19 +16,11 @@ export class RedisQueueCleanupService {
     this.QUEUE_WAIT_TIMEOUT_MINUTES = parseInt(process.env.QUEUE_WAIT_TIMEOUT_MINUTES || '35');
     this.CONTAINER_EXECUTION_TIMEOUT_MINUTES = parseInt(process.env.CONTAINER_EXECUTION_TIMEOUT_MINUTES || '3');
     this.CLEANUP_INTERVAL_MINUTES = parseInt(process.env.CLEANUP_INTERVAL_MINUTES || '60');
-    this.initializeRedisPool();
   }
 
-  private async initializeRedisPool() {
-    const { redisPool } = await import('./redis-pool.service');
-    this.redisPool = redisPool;
-  }
-
-  private async getRedisClient() {
-    if (!this.redisPool) {
-      await this.initializeRedisPool();
-    }
-    return this.redisPool.getClient();
+  private getRedisClient() {
+    // 使用静态导入的共享连接池
+    return redisPool.getClient();
   }
 
   /**

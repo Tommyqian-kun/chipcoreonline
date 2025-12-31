@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '../utils/database';
 import logger from '../config/logger';
+import { redisPool } from './redis-pool.service';
 
 /**
  * TaskID唯一性生成服务
@@ -22,7 +23,7 @@ export class TaskIdGeneratorService {
      */
     static async generateUniqueTaskId(): Promise<string> {
         let attempts = 0;
-        const { redisPool } = await import('./redis-pool.service');
+        // 使用静态导入的redisPool
         const redisClient = redisPool.getClient();
 
         while (attempts < this.MAX_RETRY_ATTEMPTS) {
@@ -121,7 +122,7 @@ export class TaskIdGeneratorService {
      */
     static async cleanupTaskId(taskId: string): Promise<void> {
         try {
-            const { redisPool } = await import('./redis-pool.service');
+            // 使用静态导入的redisPool
             await redisPool.getClient().srem(this.REDIS_TASKID_SET, taskId);
             logger.debug(`Cleaned up TaskID from active set: ${taskId}`);
         } catch (error) {
@@ -134,7 +135,7 @@ export class TaskIdGeneratorService {
      */
     static async getActiveTaskCount(): Promise<number> {
         try {
-            const { redisPool } = await import('./redis-pool.service');
+            // 使用静态导入的redisPool
             return await redisPool.getClient().scard(this.REDIS_TASKID_SET);
         } catch (error) {
             logger.error('Error getting active task count:', error);
@@ -156,7 +157,7 @@ export class TaskIdGeneratorService {
      */
     static async cleanupExpiredTaskIds(): Promise<void> {
         try {
-            const { redisPool } = await import('./redis-pool.service');
+            // 使用静态导入的redisPool
             const redisClient = redisPool.getClient();
 
             // 获取所有活跃TaskID

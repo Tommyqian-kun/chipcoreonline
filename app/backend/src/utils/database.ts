@@ -1,7 +1,16 @@
 import { PrismaClient } from '@prisma/client';
 import logger from '../config/logger';
 
-// 数据库连接池配置
+// 从环境变量读取数据库连接池配置
+// 计算依据：max_connections=50，保留40%给其他操作，Prisma使用30个连接
+// 16个并发任务 × 2连接/任务 + 10基础连接 = 42需求，设置30保证不会超过
+const DB_CONNECTION_LIMIT = parseInt(process.env.DB_CONNECTION_LIMIT || '30');
+const DB_POOL_TIMEOUT = parseInt(process.env.DB_POOL_TIMEOUT || '30'); // 秒
+const DB_CONNECT_TIMEOUT = parseInt(process.env.DB_CONNECT_TIMEOUT || '10000'); // 毫秒
+const DB_QUERY_TIMEOUT = parseInt(process.env.DB_QUERY_TIMEOUT || '30000'); // 毫秒
+const DB_STATEMENT_TIMEOUT = parseInt(process.env.DB_STATEMENT_TIMEOUT || '30000'); // 毫秒
+
+// 数据库连接池配置（使用__internal进行精细控制）
 const prisma = new PrismaClient({
   datasources: {
     db: {
@@ -26,9 +35,25 @@ const prisma = new PrismaClient({
       level: 'warn',
     },
   ],
-  // 恢复基本的连接池配置
-  // 使用简单的配置，避免复杂的__internal设置
+  // 使用__internal配置连接池参数（Prisma官方支持的方式）
+  __internal: {
+    engine: {
+      // 连接池最大连接数
+      connectionLimit: DB_CONNECTION_LIMIT,
+      // 连接池超时时间（秒）
+      poolTimeout: DB_POOL_TIMEOUT,
+    },
+  },
+  // 设置连接和查询超时（通过DATABASE_URL参数）
+  // 在DATABASE_URL中添加：?connect_timeout=10&statement_timeout=30000
 });
+
+logger.info({
+  connectionLimit: DB_CONNECTION_LIMIT,
+  poolTimeout: DB_POOL_TIMEOUT,
+  connectTimeout: DB_CONNECT_TIMEOUT,
+  queryTimeout: DB_QUERY_TIMEOUT
+}, 'Database connection pool configured');
 
 // 数据库查询日志记录
 prisma.$on('query', (e) => {

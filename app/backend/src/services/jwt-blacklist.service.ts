@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import { redisPool } from './redis-pool.service';
 
 /**
  * JWT黑名单服务
@@ -31,7 +32,7 @@ export class JwtBlacklistService {
       }
 
       // 将令牌添加到Redis黑名单，设置过期时间
-      const { redisPool } = await import('./redis-pool.service');
+      // 使用静态导入的redisPool
       const key = `${this.BLACKLIST_PREFIX}${token}`;
       await redisPool.getClient().setex(key, expiresIn, JSON.stringify({
         reason,
@@ -54,7 +55,7 @@ export class JwtBlacklistService {
    */
   static async isBlacklisted(token: string): Promise<boolean> {
     try {
-      const { redisPool } = await import('./redis-pool.service');
+      // 使用静态导入的redisPool
       const key = `${this.BLACKLIST_PREFIX}${token}`;
       const result = await redisPool.getClient().get(key);
       return result !== null;
@@ -72,7 +73,7 @@ export class JwtBlacklistService {
    */
   static async getBlacklistInfo(token: string): Promise<any | null> {
     try {
-      const { redisPool } = await import('./redis-pool.service');
+      // 使用静态导入的redisPool
       const key = `${this.BLACKLIST_PREFIX}${token}`;
       const result = await redisPool.getClient().get(key);
       return result ? JSON.parse(result) : null;
@@ -94,7 +95,7 @@ export class JwtBlacklistService {
       const invalidationTime = Math.floor(Date.now() / 1000);
       
       // 设置较长的过期时间（7天），确保覆盖所有可能的JWT有效期
-      const { redisPool } = await import('./redis-pool.service');
+      // 使用静态导入的redisPool
       await redisPool.getClient().setex(key, 7 * 24 * 60 * 60, JSON.stringify({
         reason,
         invalidationTime,
@@ -116,7 +117,7 @@ export class JwtBlacklistService {
    */
   static async isUserTokenInvalidated(userId: string, tokenIssuedAt: number): Promise<boolean> {
     try {
-      const { redisPool } = await import('./redis-pool.service');
+      // 使用静态导入的redisPool
       const key = `${this.BLACKLIST_PREFIX}user:${userId}`;
       const result = await redisPool.getClient().get(key);
       
@@ -138,7 +139,7 @@ export class JwtBlacklistService {
    */
   static async cleanupExpiredEntries(): Promise<void> {
     try {
-      const { redisPool } = await import('./redis-pool.service');
+      // 使用静态导入的redisPool
       const redisClient = redisPool.getClient();
 
       // Redis会自动清理过期的键，这个方法主要用于手动清理或统计

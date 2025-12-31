@@ -1,5 +1,6 @@
 import { Redis } from 'ioredis';
 import logger from '../config/logger';
+import { redisPool } from './redis-pool.service';
 
 /**
  * 可释放资源接口
@@ -11,22 +12,21 @@ interface DisposableResource {
 }
 
 /**
- * Redis连接包装器
+ * Redis连接包装器（使用共享连接池）
+ * 注意：由于使用共享连接池，dispose时不实际断开连接
  */
 class ManagedRedisConnection implements DisposableResource {
-  constructor(private redis: Redis, private connectionId: string) {}
+  constructor(private connectionId: string) {}
 
   getRedis(): Redis {
-    return this.redis;
+    // 返回共享的Redis连接池实例
+    return redisPool.getClient();
   }
 
   async dispose(): Promise<void> {
-    try {
-      await this.redis.quit();
-      logger.info({ connectionId: this.connectionId }, 'Redis connection disposed');
-    } catch (error) {
-      logger.error({ error, connectionId: this.connectionId }, 'Error disposing Redis connection');
-    }
+    // 使用共享连接池，不需要断开连接
+    // 只清理资源追踪记录
+    logger.info({ connectionId: this.connectionId }, 'Redis connection wrapper disposed (shared pool, no disconnect)');
   }
 
   getResourceId(): string {
@@ -34,7 +34,7 @@ class ManagedRedisConnection implements DisposableResource {
   }
 
   getResourceType(): string {
-    return 'redis_connection';
+    return 'redis_connection_wrapper';
   }
 }
 
@@ -225,16 +225,18 @@ export class ResourceManager {
   }
 
   /**
-   * 创建Redis连接资源
+   * 创建Redis连接资源（使用共享连接池）
+   * 注意：不再创建新连接，而是使用共享的redisPool
    */
-  async createRedisConnection(connectionId: string, redisUrl: string): Promise<ManagedRedisConnection> {
+  async createRedisConnection(connectionId: string, _redisUrl: string): Promise<ManagedRedisConnection> {
+    // _redisUrl参数保留以保持API兼容性，但不再使用
     return await this.allocateResource(
       connectionId,
       async () => {
-        const redis = new Redis(redisUrl);
-        return new ManagedRedisConnection(redis, connectionId);
+        // 使用共享连接池，不创建新连接
+        return new ManagedRedisConnection(connectionId);
       },
-      60 * 60 * 1000 // Redis连接1小时TTL
+      60 * 60 * 1000 // 资源追踪TTL 1小时
     );
   }
 

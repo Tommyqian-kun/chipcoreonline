@@ -2,6 +2,7 @@ import logger from '../config/logger';
 import { prisma } from '../utils/database';
 import * as fs from 'fs';
 import * as path from 'path';
+import { redisPool } from './redis-pool.service';
 
 export class TaskRetryService {
   private static readonly MAX_RETRIES = 3; // 每个任务最多3次机会（包括第一次）
@@ -227,7 +228,7 @@ export class TaskRetryService {
       });
 
       // 2. 重新入队到Redis
-      const { redisPool } = await import('./redis-pool.service');
+      // 使用静态导入的redisPool
       await redisPool.getClient().lpush('task_queue', task.id);
 
       logger.info({

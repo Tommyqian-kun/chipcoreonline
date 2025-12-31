@@ -1,12 +1,11 @@
 import logger from '../config/logger';
+import { redisPool } from './redis-pool.service';
 
 /**
  * 任务队列管理服务
  * 实现高并发场景下的任务队列控制和资源管理
  */
 export class TaskQueueService {
-  private redisPool: any;
-
   // 系统资源配置 - 可通过环境变量配置
   private readonly MAX_CONCURRENT_TASKS = parseInt(process.env.MAX_CONCURRENT_TASKS || '16'); // ECS最大并发处理能力
   private readonly MAX_QUEUE_LENGTH = parseInt(process.env.MAX_QUEUE_LENGTH || '48'); // 队列最大长度（并发能力的3倍）
@@ -14,21 +13,9 @@ export class TaskQueueService {
   private readonly USER_TASKS_PREFIX = 'user_tasks:';
   private readonly QUEUE_STATS_KEY = 'queue_stats';
 
-  constructor() {
-    // 使用Redis连接池
-    this.initializeRedisPool();
-  }
-
-  private async initializeRedisPool() {
-    const { redisPool } = await import('./redis-pool.service');
-    this.redisPool = redisPool;
-  }
-
-  private async getRedisClient() {
-    if (!this.redisPool) {
-      await this.initializeRedisPool();
-    }
-    return this.redisPool.getClient();
+  private getRedisClient() {
+    // 使用静态导入的共享连接池
+    return redisPool.getClient();
   }
 
   /**

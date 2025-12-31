@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import logger from '../config/logger';
+import { redisPool } from './redis-pool.service';
 
 // Dashboard Statistics
 export const getDashboardStatistics = async () => {
@@ -1130,7 +1131,6 @@ export const getToolsAnalytics = async () => {
 export const getSystemMetrics = async () => {
   try {
     // 获取Redis连接池状态
-    const { redisPool } = await import('./redis-pool.service');
     const queueStatus = await redisPool.getQueueStatus();
 
     // 获取任务统计

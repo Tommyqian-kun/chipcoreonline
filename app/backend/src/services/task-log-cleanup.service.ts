@@ -1,10 +1,8 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/database';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { DeploymentModeService } from './deployment-mode.service';
 import logger from '../config/logger';
-
-const prisma = new PrismaClient();
 
 /**
  * 任务日志清理服务

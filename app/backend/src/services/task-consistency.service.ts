@@ -1,10 +1,8 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/database';
 import logger from '../config/logger';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ECS_LOCAL_PATHS } from '../config/paths';
-
-const prisma = new PrismaClient();
 
 export class TaskConsistencyService {
   /**

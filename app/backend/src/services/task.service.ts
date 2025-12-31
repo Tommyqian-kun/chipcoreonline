@@ -12,6 +12,7 @@ import { ToolExecutionService } from './tool-execution.service';
 import { createTaskLogger, TaskLogger } from './task-logger.service';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { redisPool } from './redis-pool.service';
 
 export const createTask = async (body: any, userId: string, inputFiles?: Express.Multer.File[]): Promise<Task> => {
     // 标记：订阅中间件已经预留了并发槽位
@@ -93,7 +94,7 @@ export const createTask = async (body: any, userId: string, inputFiles?: Express
 
     // 步骤3：检查Redis队列上限
     await taskLogger.logStepStart('REDIS_QUEUE_CHECK', 'Checking Redis queue capacity');
-    const { redisPool } = await import('./redis-pool.service');
+    // 使用静态导入的redisPool
     const maxQueueLength = parseInt(process.env.MAX_QUEUE_LENGTH || '48');
     const currentQueueLength = await redisPool.getClient().llen('task_queue');
 
@@ -639,12 +640,25 @@ export const updateTaskStatusInternal = async (taskId: string, updateData: {
   downloadStatus?: string;
   downloadTimeRemaining?: number;
 }) => {
+  // 类型转换：确保Date字段转为ISO字符串，status转为TaskStatus
+  const updatePayload: any = {
+    ...updateData,
+    updatedAt: new Date().toISOString() // Prisma需要ISO字符串格式
+  };
+
+  // 如果有status，确保它是正确的枚举类型
+  if (updateData.status) {
+    updatePayload.status = updateData.status as any; // 类型断言以绕过TypeScript检查
+  }
+
+  // 如果有finishedAt，转换为ISO字符串
+  if (updateData.finishedAt) {
+    updatePayload.finishedAt = updateData.finishedAt.toISOString();
+  }
+
   const task = await prisma.task.update({
     where: { id: taskId },
-    data: {
-      ...updateData,
-      updatedAt: new Date()
-    }
+    data: updatePayload
   });
 
   // 发送WebSocket通知给前端

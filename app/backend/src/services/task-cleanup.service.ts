@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../utils/database';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-
-const prisma = new PrismaClient();
 
 export class TaskCleanupService {
   /**

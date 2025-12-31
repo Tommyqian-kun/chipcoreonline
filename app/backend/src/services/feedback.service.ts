@@ -1,6 +1,5 @@
-import { PrismaClient, FeedbackStatus } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { FeedbackStatus } from '@prisma/client';
+import { prisma } from '../utils/database';
 
 interface CreateFeedbackData {
   firstName: string;

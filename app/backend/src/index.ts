@@ -267,8 +267,7 @@ async function startServer() {
   // Initialize SDC multi-page database schema if needed
   try {
     const { ExcelThrpagesService } = await import('./services/excel_thrpages.service');
-    const { PrismaClient } = await import('@prisma/client');
-    const prisma = new PrismaClient();
+    const { prisma } = await import('./utils/database');
 
     // Check if SDC schema is already initialized
     const existingSdcSheets = await prisma.sheet.findMany({
@@ -282,8 +281,7 @@ async function startServer() {
     } else {
       logger.info(`✅ SDC multi-page database schema already exists (${existingSdcSheets.length} sheets)`);
     }
-
-    await prisma.$disconnect();
+    // 不需要$disconnect()，使用共享的prisma实例
   } catch (error) {
     logger.error('❌ Failed to initialize SDC multi-page database schema:', error);
   }
@@ -291,8 +289,7 @@ async function startServer() {
   // Initialize UPF multi-page database schema if needed
   try {
     const { ExcelThrpagesService } = await import('./services/excel_thrpages.service');
-    const { PrismaClient } = await import('@prisma/client');
-    const prisma = new PrismaClient();
+    const { prisma } = await import('./utils/database');
 
     // Check if UPF schema is already initialized
     const existingUpfSheets = await prisma.sheet.findMany({
@@ -306,8 +303,7 @@ async function startServer() {
     } else {
       logger.info(`✅ UPF multi-page database schema already exists (${existingUpfSheets.length} sheets)`);
     }
-
-    await prisma.$disconnect();
+    // 不需要$disconnect()，使用共享的prisma实例
   } catch (error) {
     logger.error('❌ Failed to initialize UPF multi-page database schema:', error);
     // 不要阻塞启动，继续执行
