@@ -117,6 +117,14 @@ export class RedisPoolService {
   }
 
   public getClient(): Redis {
+    // 主动建立连接，确保启动时连接已就绪
+    // 解决 lazyConnect=true + enableOfflineQueue=false 导致的启动时序问题
+    // 当连接状态为 'wait' 时（使用 lazyConnect 时的初始状态），显式调用 connect() 建立连接
+    if (this.redisClient.status === 'wait') {
+      this.redisClient.connect().catch(err => {
+        logger.error({ error: err.message }, 'Failed to establish Redis connection');
+      });
+    }
     return this.redisClient;
   }
 

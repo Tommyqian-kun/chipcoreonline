@@ -10,7 +10,7 @@ const DB_CONNECT_TIMEOUT = parseInt(process.env.DB_CONNECT_TIMEOUT || '10000'); 
 const DB_QUERY_TIMEOUT = parseInt(process.env.DB_QUERY_TIMEOUT || '30000'); // 毫秒
 const DB_STATEMENT_TIMEOUT = parseInt(process.env.DB_STATEMENT_TIMEOUT || '30000'); // 毫秒
 
-// 数据库连接池配置（使用__internal进行精细控制）
+// 数据库连接池配置
 const prisma = new PrismaClient({
   datasources: {
     db: {
@@ -35,17 +35,8 @@ const prisma = new PrismaClient({
       level: 'warn',
     },
   ],
-  // 使用__internal配置连接池参数（Prisma官方支持的方式）
-  __internal: {
-    engine: {
-      // 连接池最大连接数
-      connectionLimit: DB_CONNECTION_LIMIT,
-      // 连接池超时时间（秒）
-      poolTimeout: DB_POOL_TIMEOUT,
-    },
-  },
-  // 设置连接和查询超时（通过DATABASE_URL参数）
-  // 在DATABASE_URL中添加：?connect_timeout=10&statement_timeout=30000
+  // 连接池配置通过DATABASE_URL参数设置
+  // 示例：postgresql://user:pass@host:port/db?connection_limit=30&pool_timeout=30&connect_timeout=10
 });
 
 logger.info({

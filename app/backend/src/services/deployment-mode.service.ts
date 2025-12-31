@@ -24,6 +24,9 @@ interface OssConfig {
   storageService: string;
   ossRegion?: string;
   ossBucket?: string;
+  // 这些属性在OSS模式下不使用，但需要存在以兼容类型
+  jobsDir?: undefined;
+  tempJobsDir?: undefined;
 }
 
 type DeploymentConfig = EcsOnlyConfig | OssConfig;

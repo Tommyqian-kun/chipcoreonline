@@ -14,7 +14,6 @@ import ResetPasswordPage from './pages/auth/reset-password';
 import VerifyCodePage from './pages/auth/verify-code';
 import ProfilePage from './pages/profile';
 import DebugPage from './pages/debug';
-import DatabaseViewer from './pages/database-viewer';
 import ProtectedRoute from './components/protected-route';
 
 // Admin components
