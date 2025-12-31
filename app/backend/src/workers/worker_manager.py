@@ -14,6 +14,8 @@ import subprocess
 import threading
 import json
 import redis
+import asyncio
+import concurrent.futures
 from pathlib import Path
 from typing import List, Dict, Any
 from dotenv import load_dotenv
@@ -211,6 +213,40 @@ class IndependentResourceManager:
                    f"CPU {current_resources.get('cpu_used', 0)}/{self.max_cpu}, "
                    f"Memory {current_resources.get('memory_used_gb', 0)}/{self.max_memory_gb}GB, "
                    f"Active tasks: {current_resources.get('active_tasks_count', 0)}")
+
+        # 验证配置一致性
+        self._validate_configuration()
+
+    def _validate_configuration(self):
+        """验证资源配置的一致性"""
+        worker_count = int(os.getenv('WORKER_COUNT', 4))
+        max_concurrent_per_worker = int(os.getenv('MAX_CONCURRENT_PER_WORKER', 4))
+        total_concurrent_capacity = worker_count * max_concurrent_per_worker
+
+        # 检查资源是否足够
+        required_cpu = total_concurrent_capacity * self.cpu_per_task
+        required_memory = total_concurrent_capacity * self.memory_per_task_gb
+
+        if required_cpu > self.max_cpu:
+            logger.warning(
+                f"Configuration warning: CPU insufficient. "
+                f"Required: {required_cpu}, Available: {self.max_cpu}. "
+                f"Consider reducing WORKER_COUNT or MAX_CONCURRENT_PER_WORKER."
+            )
+
+        if required_memory > self.max_memory_gb:
+            logger.warning(
+                f"Configuration warning: Memory insufficient. "
+                f"Required: {required_memory}GB, Available: {self.max_memory_gb}GB. "
+                f"Consider reducing WORKER_COUNT or MAX_CONCURRENT_PER_WORKER."
+            )
+
+        logger.info(
+            f"Resource configuration validated: "
+            f"{worker_count} workers × {max_concurrent_per_worker} concurrent = "
+            f"{total_concurrent_capacity} total concurrent capacity "
+            f"(CPU: {required_cpu}/{self.max_cpu}, Memory: {required_memory}/{self.max_memory_gb}GB)"
+        )
     
     def try_allocate_resources(self, task_id: str) -> bool:
         """尝试分配资源 - 使用Redis原子操作"""
@@ -312,13 +348,23 @@ class IndependentResourceManager:
 
 
 class TaskWorker:
-    """单个Worker进程"""
-    
+    """异步Worker进程 - 支持多任务并发处理"""
+
     def __init__(self, worker_id: int, resource_manager: IndependentResourceManager):
         self.worker_id = worker_id
         self.resource_manager = resource_manager
         self.logger = logging.getLogger(f'Worker-{worker_id}')
         self.running = True
+
+        # 新增：并发控制
+        self.max_concurrent = int(os.getenv('MAX_CONCURRENT_PER_WORKER', 4))
+        self.running_tasks: Dict[str, asyncio.Task] = {}  # {task_id: asyncio_task}
+
+        # 创建线程池执行器（用于运行同步的process_task）
+        self.executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=self.max_concurrent,
+            thread_name_prefix=f'Worker-{worker_id}-Task'
+        )
 
         # 导入Worker逻辑并设置共享资源管理器
         from toolWorker import process_task, redis_client, TASK_QUEUE_NAME, set_shared_resource_manager
@@ -329,71 +375,174 @@ class TaskWorker:
         # 设置共享资源管理器到toolWorker模块
         set_shared_resource_manager(resource_manager)
 
-        self.logger.info(f"Worker {worker_id} initialized with shared resource manager")
-    
-    def run(self):
-        """Worker主循环"""
-        self.logger.info(f"Worker {self.worker_id} started")
-        
+        self.logger.info(
+            f"Worker {worker_id} initialized (max_concurrent={self.max_concurrent})"
+        )
+
+    async def run(self):
+        """异步Worker主循环"""
+        self.logger.info(f"Worker {self.worker_id} started (async mode)")
+
         while self.running:
             try:
-                # 检查资源可用性
-                if not self._has_available_resources():
-                    time.sleep(10)
+                # 1. 检查当前并发数
+                if len(self.running_tasks) >= self.max_concurrent:
+                    self.logger.debug(
+                        f"Worker {self.worker_id}: reached concurrent limit "
+                        f"({len(self.running_tasks)}/{self.max_concurrent}), waiting..."
+                    )
+                    await asyncio.sleep(1)
+                    await self._cleanup_completed_tasks()
                     continue
-                
-                # 从队列获取任务
-                task_id = self._get_next_task()
+
+                # 2. 检查系统资源可用性
+                if not self._has_available_resources():
+                    status = self.resource_manager.get_resource_status()
+                    self.logger.debug(
+                        f"Worker {self.worker_id}: insufficient system resources, waiting. "
+                        f"CPU: {status['cpu_used']}/{status['cpu_total']}, "
+                        f"Memory: {status['memory_used_gb']}/{status['memory_total_gb']}GB"
+                    )
+                    await asyncio.sleep(10)
+                    continue
+
+                # 3. 异步获取任务 (非阻塞)
+                task_id = await self._get_next_task_async()
                 if not task_id:
                     continue
-                
-                # 尝试分配资源
+
+                # 4. 尝试分配资源
                 if not self.resource_manager.try_allocate_resources(task_id):
-                    # 资源不足，重新入队
+                    self.logger.warning(
+                        f"Worker {self.worker_id}: resource allocation failed for {task_id}, re-queueing"
+                    )
                     self.redis_client.lpush(self.task_queue_name, task_id)
-                    time.sleep(5)
+                    await asyncio.sleep(1)
                     continue
-                
-                # 处理任务
-                try:
-                    self.logger.info(f"Processing task {task_id}")
-                    self.process_task(task_id)
-                    self.logger.info(f"Task {task_id} completed")
-                except Exception as e:
-                    self.logger.error(f"Error processing task {task_id}: {e}", exc_info=True)
-                finally:
-                    # 释放资源
-                    self.resource_manager.release_resources(task_id)
-                    
-            except KeyboardInterrupt:
-                self.logger.info(f"Worker {self.worker_id} received shutdown signal")
+
+                # 记录资源分配成功
+                status_after = self.resource_manager.get_resource_status()
+                self.logger.info(
+                    f"Worker {self.worker_id}: resources allocated for {task_id}, "
+                    f"CPU: {status_after['cpu_used']}/{status_after['cpu_total']}, "
+                    f"Memory: {status_after['memory_used_gb']}/{status_after['memory_total_gb']}GB"
+                )
+
+                # 5. 创建异步任务（不阻塞主循环）
+                async_task = asyncio.create_task(
+                    self._process_task_async_wrapper(task_id)
+                )
+                self.running_tasks[task_id] = async_task
+
+                self.logger.info(
+                    f"Worker {self.worker_id}: started task {task_id} "
+                    f"(concurrent: {len(self.running_tasks)}/{self.max_concurrent})"
+                )
+
+                # 6. 清理已完成的任务
+                await self._cleanup_completed_tasks()
+
+            except asyncio.CancelledError:
+                self.logger.info(f"Worker {self.worker_id} received cancel signal")
                 break
             except Exception as e:
-                self.logger.error(f"Unexpected error in worker {self.worker_id}: {e}", exc_info=True)
-                time.sleep(10)
-        
+                self.logger.error(
+                    f"Worker {self.worker_id}: unexpected error: {e}",
+                    exc_info=True
+                )
+                await asyncio.sleep(10)
+
+        # 清理所有运行中的任务
+        await self._cleanup_all_tasks()
         self.logger.info(f"Worker {self.worker_id} stopped")
-    
+
+    async def _process_task_async_wrapper(self, task_id: str):
+        """异步包装器 - 在线程池中执行同步的process_task"""
+        try:
+            self.logger.info(f"Worker {self.worker_id}: processing task {task_id}")
+
+            # 在线程池中执行同步的process_task函数
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(self.executor, self.process_task, task_id)
+
+            self.logger.info(f"Worker {self.worker_id}: task {task_id} completed")
+
+        except Exception as e:
+            self.logger.error(
+                f"Worker {self.worker_id}: task {task_id} failed: {e}",
+                exc_info=True
+            )
+        finally:
+            # 确保资源被释放
+            self.resource_manager.release_resources(task_id)
+            # 记录资源释放后的状态
+            status_after = self.resource_manager.get_resource_status()
+            self.logger.debug(
+                f"Worker {self.worker_id}: resources released for {task_id}, "
+                f"CPU: {status_after['cpu_used']}/{status_after['cpu_total']}, "
+                f"Memory: {status_after['memory_used_gb']}/{status_after['memory_total_gb']}GB"
+            )
+
+    async def _get_next_task_async(self) -> str:
+        """异步获取下一个任务（非阻塞）"""
+        try:
+            # 使用非阻塞的LPOP，而不是阻塞的BLPOP
+            result = self.redis_client.lpop(self.task_queue_name)
+            if result:
+                return result
+            else:
+                # 队列为空，短暂等待
+                await asyncio.sleep(0.5)
+                return None
+        except Exception as e:
+            self.logger.error(f"Worker {self.worker_id}: error getting task from queue: {e}")
+            return None
+
+    async def _cleanup_completed_tasks(self):
+        """清理已完成的任务"""
+        completed_tasks = []
+        for task_id, async_task in self.running_tasks.items():
+            if async_task.done():
+                completed_tasks.append(task_id)
+
+        if completed_tasks:
+            self.logger.debug(
+                f"Worker {self.worker_id}: cleaning up {len(completed_tasks)} completed task(s): {completed_tasks}"
+            )
+
+        for task_id in completed_tasks:
+            del self.running_tasks[task_id]
+            self.logger.debug(
+                f"Worker {self.worker_id}: removed completed task {task_id} "
+                f"(remaining: {len(self.running_tasks)})"
+            )
+
+    async def _cleanup_all_tasks(self):
+        """清理所有任务"""
+        # 取消所有运行中的任务
+        for task_id, async_task in list(self.running_tasks.items()):
+            if not async_task.done():
+                async_task.cancel()
+                try:
+                    await async_task
+                except asyncio.CancelledError:
+                    pass
+        self.running_tasks.clear()
+
+        # 关闭线程池
+        self.executor.shutdown(wait=True)
+
     def _has_available_resources(self) -> bool:
         """检查是否有可用资源"""
         status = self.resource_manager.get_resource_status()
         cpu_per_task = int(os.getenv('JOB_CPU_REQUEST', 1))
         memory_per_task = int(os.getenv('JOB_MEMORY_REQUEST_GB', 4))
-        
-        return (status['cpu_used'] + cpu_per_task <= status['cpu_total'] and
-                status['memory_used_gb'] + memory_per_task <= status['memory_total_gb'])
-    
-    def _get_next_task(self) -> str:
-        """从队列获取下一个任务"""
-        try:
-            result = self.redis_client.blpop(self.task_queue_name, timeout=30)
-            if result:
-                _, task_id_bytes = result
-                return task_id_bytes.decode('utf-8')
-        except Exception as e:
-            self.logger.error(f"Error getting task from queue: {e}")
-        return None
-    
+
+        return (
+            status['cpu_used'] + cpu_per_task <= status['cpu_total'] and
+            status['memory_used_gb'] + memory_per_task <= status['memory_total_gb']
+        )
+
     def stop(self):
         """停止Worker"""
         self.running = False
