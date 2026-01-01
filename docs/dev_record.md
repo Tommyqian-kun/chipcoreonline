@@ -8,6 +8,7 @@
 
 | 版本号 | 提交信息 | 提交日期 |
 |--------|----------|----------|
+| 6320358 | fix: 修复 docs/critical_issues_fix.md 中的关键问题 | 2026-01-01 |
 | 47f862f | fix: 修复浏览器 require is not defined 错误和 TypeScript 类型问题 | 2026-01-01 |
 | eaf589f | fix: 修复前后端各30多处的TypeScript 类型错误和新增docs/dev_improve_*.md文档 | 2026-01-01 |
 | d549bc3 | fix: 修复Redis连接池启动时序问题和TypeScript类型检查错误 | 2025-12-31 |
@@ -20,6 +21,152 @@
 ---
 
 ## 版本详情
+
+### 版本 9: 6320358
+
+**提交信息**: fix: 修复 docs/critical_issues_fix.md 中的关键问题
+
+**提交日期**: 2026-01-01
+
+**作者**: Claude Code <noreply@anthropic.com>
+
+#### 修复概述
+
+本次提交系统性地修复了 `docs/critical_issues_fix.md` 文档中描述的多个关键问题，提升系统稳定性、安全性和可靠性。
+
+#### 修复内容详细说明
+
+##### 1. Redis连接池优化 (问题1, 9)
+
+**问题**:
+- Redis连接断开后缺乏状态恢复机制
+- 线性重试策略效率低
+
+**修复**:
+- 添加 `recoverConnectionState()` 方法，重连后自动恢复队列和任务状态
+- 使用指数退避重试策略替代线性重试
+
+**文件**: `app/backend/src/services/redis-pool.service.ts`
+
+##### 2. 文件上传安全验证 (问题3)
+
+**问题**:
+- 缺乏文件类型验证，存在安全风险
+
+**修复**:
+- 创建 `validateUploadFiles` 中间件
+- 只允许芯片设计工具相关文件格式 (.v, .sv, .yaml, .tcl 等)
+- 阻止危险文件类型 (.exe, .js, .php 等)
+
+**文件**: `app/backend/src/middleware/file-upload-validation.ts`
+**集成到**: `sdc_thrpages.routes.ts`, `upf_thrpages.routes.ts`
+
+##### 3. WebSocket速率限制优化 (问题4)
+
+**问题**:
+- 连接速率限制实现有缺陷，计数只增不减
+- 不符合芯片设计工程师实际使用场景
+
+**修复**:
+- **移除连接速率限制**（用户刷新页面、多标签页是正常行为）
+- **保留事件速率限制**（60次/秒，防止客户端bug）
+- **保留订阅数量限制**（100个/socket，防止内存溢出）
+
+**文件**: `app/backend/src/services/websocket.service.ts`
+
+**重要说明**: 移除连接限制是符合生产场景的正确设计，因为：
+- 芯片设计工程师是可信用户
+- 已有JWT认证和用户并发限制保护
+- 浏览器本身有并发连接限制
+
+##### 4. 支付回调签名验证 (问题5)
+
+**问题**:
+- 微信支付回调缺乏签名验证
+
+**修复**:
+- 创建 `wechatPayNotificationMiddleware` 中间件
+- 使用 RSA-SHA256 验证签名
+- 使用 AES-256-GCM 解密回调数据
+- 可选的 IP 白名单验证
+
+**文件**: `app/backend/src/middleware/wechatpay-notification.ts`
+**集成到**: `payment.routes.ts`
+
+##### 5. API超时优化 (问题6)
+
+**问题**:
+- 缺乏请求超时机制
+- 超时后无法真正取消正在执行的操作
+
+**修复**:
+- 创建 `apiTimeoutMiddleware` 中间件
+- 使用 `AbortController` 真正中断异步操作
+- 根据请求类型设置不同超时时间：
+  - 默认: 30秒
+  - 工具执行/文件上传下载: 5分钟
+  - 认证: 10秒
+
+**文件**: `app/backend/src/middleware/api-timeout.ts`
+**集成到**: `index.ts`
+
+##### 6. 并发槽位动态TTL (问题7)
+
+**问题**:
+- 并发槽位使用固定TTL（3600秒）
+- 长时间运行任务可能过期
+
+**修复**:
+- 改为动态计算TTL，基于实际任务执行时间
+- 计算公式：队列等待时间 + 容器启动时间 + 执行超时时间 + 缓冲时间
+- 添加 `refreshSlotTTL()` 方法支持手动刷新
+
+**文件**: `app/backend/src/services/user-concurrent-check.service.ts`
+
+##### 7. 清理服务分布式锁 (问题11)
+
+**问题**:
+- 使用本地 `isRunning` 标志
+- 多实例部署时可能同时执行清理
+
+**修复**:
+- 使用 Redis 分布式锁 (`SET ... NX EX ...`)
+- 基于 HOSTNAME + 时间戳生成唯一锁ID
+- 防止多实例同时执行清理
+
+**文件**: `app/backend/src/services/cleanup.service.ts`
+
+##### 8. 资源TTL自动刷新 (问题12)
+
+**问题**:
+- 长时间运行任务可能因槽位TTL过期而中断
+
+**修复**:
+- 创建 `UserConcurrentRefreshService` 服务
+- 每15分钟自动刷新活跃任务的用户槽位TTL
+- 启动时立即执行一次刷新
+
+**文件**: `app/backend/src/services/user-concurrent-refresh.service.ts`
+**集成到**: `index.ts`
+
+#### 新增文档
+
+- `docs/critical_issues_fix.md`: 问题修复详细文档
+
+#### 测试验证
+
+- ✅ TypeScript 编译通过
+- ✅ WebSocket 连接问题已修复
+- ✅ 符合芯片设计平台生产场景
+
+#### 技术亮点
+
+1. **指数退避重试**: Redis 重连使用指数退避策略，提高效率
+2. **AbortController**: API 超时真正取消操作，而非仅返回错误
+3. **动态TTL**: 根据实际任务时间动态计算槽位TTL
+4. **生产场景适配**: WebSocket 限制策略基于真实使用场景设计
+
+---
 
 ### 版本 8: 47f862f
 
