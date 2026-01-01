@@ -7,6 +7,7 @@ import { Router, Request, Response, type RequestHandler } from 'express';
 import { authenticateToken } from '../middleware/auth';
 import { checkTaskExecutionPermission } from '../middleware/subscription';
 import { validate } from '../middleware/validate';
+import { validateUploadFiles } from '../middleware/file-upload-validation';
 import * as upfThrpagesController from '../controllers/upf_thrpages.controller';
 import { z } from 'zod';
 import multer from 'multer';
@@ -116,6 +117,7 @@ router.post(
     { name: 'pobjTclFile', maxCount: 1 },
     { name: 'pcellYamlFile', maxCount: 1 }
   ])),
+  validateUploadFiles, // 文件安全验证中间件
   validate(initializeTaskSchema),
   upfThrpagesController.initializeTask
 );
