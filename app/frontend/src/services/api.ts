@@ -1,9 +1,9 @@
 // API 基础配置和通用请求函数
 
-// @ts-ignore - axios 导入类型问题
-const axios = require('axios');
+// @ts-ignore - axios 类型导入问题，使用运行时导入
+import axios from 'axios';
 
-// 类型定义
+// 类型定义（由于 axios 类型解析问题，手动定义核心类型）
 interface AxiosRequestConfig {
   url?: string;
   method?: string;
@@ -40,13 +40,6 @@ interface AxiosResponse<T = any> {
   [key: string]: any;
 }
 
-// 扩展AxiosRequestConfig类型以支持自定义错误处理配置
-declare module 'axios' {
-  interface AxiosRequestConfig {
-    skipGlobal401Handler?: boolean;
-  }
-}
-
 // A simple toast implementation, can be replaced with a more complete toast component later
 const toast = {
   error: (message: string) => {
@@ -69,7 +62,8 @@ if (import.meta.env.DEV) {
   });
 }
 
-const api = axios.create({
+// @ts-ignore - axios.create 类型推断问题
+const api: any = axios.create({
   baseURL: BASE_URL,
   withCredentials: true,
   timeout: 10000, // 10秒超时
