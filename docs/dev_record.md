@@ -709,7 +709,7 @@ LogicCore 项目初始化版本，包含完整的 SDC 和 UPF 生成工具，支
 | v5 (895d1cd) | 数据库和 Redis 连接池优化，支持高并发 |
 | v6 (d549bc3) | 连接池启动时序修复，类型错误修复 |
 | v7 (eaf589f) | TypeScript 类型错误全面修复（60+ 处），准备合并到 master |
-
+| v8 (47f862f) | 修复浏览器 require 错误和 TypeScript 类型问题 |
 ---
 
 ## 技术演进亮点
