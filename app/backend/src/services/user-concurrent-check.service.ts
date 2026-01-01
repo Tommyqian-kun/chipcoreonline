@@ -15,9 +15,65 @@ import logger from '../config/logger';
 export class UserConcurrentCheckService {
   private static instance: UserConcurrentCheckService;
   private readonly USER_CONCURRENT_PREFIX = 'user_concurrent:';
-  private readonly SLOT_EXPIRE_SECONDS = 3600; // 槽位记录1小时过期
 
   private constructor() {}
+
+  /**
+   * 动态计算槽位TTL
+   *
+   * 基于实际任务执行时间计算，确保槽位不会在任务执行期间过期
+   *
+   * @returns TTL秒数
+   */
+  private getSlotExpireSeconds(): number {
+    // 从环境变量读取超时配置，与task-timeout.service.ts保持一致
+    const queueWaitTimeoutMinutes = parseInt(process.env.QUEUE_WAIT_TIMEOUT_MINUTES || '35');
+    const containerStartupTimeoutSeconds = 180; // 3分钟固定
+    const executionTimeoutMinutes = parseInt(process.env.CONTAINER_EXECUTION_TIMEOUT_MINUTES || '3');
+    const bufferSeconds = 300; // 5分钟额外缓冲
+
+    // 计算总TTL（转换为秒）
+    const queueWaitSeconds = queueWaitTimeoutMinutes * 60;
+    const executionTimeoutSeconds = executionTimeoutMinutes * 60 * 60;
+
+    const totalTTL = queueWaitSeconds + containerStartupTimeoutSeconds + executionTimeoutSeconds + bufferSeconds;
+
+    logger.debug({
+      queueWaitMinutes: queueWaitTimeoutMinutes,
+      executionTimeoutMinutes: executionTimeoutMinutes,
+      totalTTLSeconds: totalTTL,
+      totalTTLHours: (totalTTL / 3600).toFixed(2)
+    }, 'Calculated dynamic slot TTL');
+
+    return totalTTL;
+  }
+
+  /**
+   * 刷新用户槽位的TTL
+   * 在任务状态更新时调用，确保槽位不会过早过期
+   *
+   * @param userId 用户ID
+   */
+  async refreshSlotTTL(userId: string): Promise<void> {
+    try {
+      const redis = redisPool.getClient();
+      const userKey = `${this.USER_CONCURRENT_PREFIX}${userId}`;
+      const newTTL = this.getSlotExpireSeconds();
+
+      await redis.expire(userKey, newTTL);
+
+      logger.debug({
+        userId,
+        newTTL,
+        newTTLHours: (newTTL / 3600).toFixed(2)
+      }, 'Slot TTL refreshed');
+    } catch (error) {
+      logger.error({
+        error: error instanceof Error ? error.message : 'Unknown error',
+        userId
+      }, 'Failed to refresh slot TTL');
+    }
+  }
 
   public static getInstance(): UserConcurrentCheckService {
     if (!UserConcurrentCheckService.instance) {
@@ -72,6 +128,7 @@ export class UserConcurrentCheckService {
       const redis = redisPool.getClient();
       const userKey = `${this.USER_CONCURRENT_PREFIX}${userId}`;
       const timestamp = Date.now();
+      const slotExpireSeconds = this.getSlotExpireSeconds(); // 使用动态计算的TTL
 
       // 执行Lua脚本
       const result = await redis.eval(
@@ -80,7 +137,7 @@ export class UserConcurrentCheckService {
         userKey, // KEYS[1]
         maxConcurrent.toString(), // ARGV[1]
         timestamp.toString(), // ARGV[2]
-        this.SLOT_EXPIRE_SECONDS.toString() // ARGV[3]
+        slotExpireSeconds.toString() // ARGV[3] - 使用动态TTL
       ) as number[];
 
       const allowed = result[0] === 1;
@@ -227,13 +284,14 @@ export class UserConcurrentCheckService {
 
       // 批量更新Redis
       const redis = redisPool.getClient();
+      const slotExpireSeconds = this.getSlotExpireSeconds(); // 使用动态TTL
       let totalSlotsSynced = 0;
 
       for (const { userId, count } of usersToSync) {
         const userKey = `${this.USER_CONCURRENT_PREFIX}${userId}`;
         await redis.hset(userKey, 'count', count);
         await redis.hset(userKey, 'last_sync', Date.now());
-        await redis.expire(userKey, this.SLOT_EXPIRE_SECONDS);
+        await redis.expire(userKey, slotExpireSeconds); // 使用动态TTL
         totalSlotsSynced += count;
       }
 
@@ -271,20 +329,22 @@ export class UserConcurrentCheckService {
       const keys = await redis.keys(pattern);
 
       let cleanedCount = 0;
+      const slotExpireSeconds = this.getSlotExpireSeconds(); // 使用动态TTL
 
       for (const key of keys) {
         // 检查是否有设置过期时间
         const ttl = await redis.ttl(key);
         if (ttl === -1) {
           // 没有过期时间，设置默认过期时间
-          await redis.expire(key, this.SLOT_EXPIRE_SECONDS);
+          await redis.expire(key, slotExpireSeconds);
           cleanedCount++;
         }
       }
 
       logger.info({
         cleanedCount,
-        totalKeys: keys.length
+        totalKeys: keys.length,
+        defaultTTL: slotExpireSeconds
       }, 'Cleanup expired slots completed');
 
       return { cleanedCount };

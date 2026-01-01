@@ -38,6 +38,7 @@ import {
   deprecationNoticeMiddleware,
   getVersionStats
 } from './middleware/api-version';
+import { apiTimeoutMiddleware } from './middleware/api-timeout';
 import authRoutes from './routes/auth.routes';
 import orderRoutes from './routes/order.routes';
 import subscriptionRoutes from './routes/subscription.routes';
@@ -63,6 +64,7 @@ import { TaskTimeoutService } from './services/task-timeout.service';
 import { TaskConsistencyService } from './services/task-consistency.service';
 import { TaskRetryService } from './services/task-retry.service';
 import { TaskLogCleanupService } from './services/task-log-cleanup.service';
+import { UserConcurrentRefreshService } from './services/user-concurrent-refresh.service';
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import { ECS_LOCAL_PATHS } from './config/paths';
@@ -139,6 +141,9 @@ async function startServer() {
   app.use(express.json({ limit: '10mb' }));
   app.use(wrapMiddleware(cookieParser()));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+  // API timeout middleware - 设置不同类型请求的超时时间
+  app.use(apiTimeoutMiddleware);
 
   // --- API Routes ---
   const apiV1Router = express.Router();
@@ -364,6 +369,14 @@ async function startServer() {
     logger.error({ error }, '❌ Failed to start task log cleanup service');
   }
 
+  // Initialize user concurrent slot TTL refresh service
+  try {
+    UserConcurrentRefreshService.startRefreshService(15); // 每15分钟刷新一次
+    logger.info('✅ User concurrent slot TTL refresh service started successfully');
+  } catch (error) {
+    logger.error({ error }, '❌ Failed to start user concurrent slot TTL refresh service');
+  }
+
   // 【新增】Initialize user concurrent state sync
   // 从数据库同步活跃任务的用户并发状态到Redis
   try {
@@ -445,6 +458,9 @@ async function startServer() {
 
       // Stop cleanup service
       CleanupService.stopCleanupService();
+
+      // Stop user concurrent slot TTL refresh service
+      UserConcurrentRefreshService.stopRefreshService();
 
       // Stop Worker service
       try {

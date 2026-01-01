@@ -3,6 +3,8 @@
  * 实现精确的目录清理机制：
  * - 正常完成任务：2分钟下载期结束后精确清理jobs/temp/logs三个目录
  * - 失败/出错任务：jobs目录5分钟清理，temp/logs目录保留24小时用于问题分析
+ *
+ * 使用Redis分布式锁防止多实例同时执行清理
  */
 
 import * as fs from 'fs';
@@ -12,13 +14,20 @@ import { DeploymentModeService } from './deployment-mode.service';
 import { EcsLocalStorageService } from './ecs-local-storage.service';
 import { ExcelThrpagesService } from './excel_thrpages.service';
 import { TaskLogCleanupService } from './task-log-cleanup.service';
+import { redisPool } from './redis-pool.service';
 import { prisma } from '../utils/database';
 import logger from '../config/logger';
+
+// 分布式锁配置
+const CLEANUP_LOCK_KEY = 'ecs:cleanup:lock';
+const PRECISE_CLEANUP_LOCK_KEY = 'ecs:cleanup:precise:lock';
+const CLEANUP_LOCK_TTL = 300; // 5分钟锁TTL
+const LOCK_RETRY_ATTEMPTS = 2; // 重试次数
+const LOCK_RETRY_DELAY = 100; // 重试延迟(ms)
 
 export class CleanupService {
     private static cleanupInterval: NodeJS.Timeout | null = null;
     private static preciseCleanupInterval: NodeJS.Timeout | null = null;
-    private static isRunning = false;
 
     /**
      * 启动清理服务
@@ -72,8 +81,33 @@ export class CleanupService {
     /**
      * 检查已完成任务的精确清理时机（每10秒执行一次）
      * 正常完成任务后，2分钟下载期结束时精确清理jobs/temp/logs三个目录
+     * 使用Redis分布式锁防止多实例同时执行
      */
     private static async checkCompletedTasksForPreciseCleanup(): Promise<void> {
+        // 获取分布式锁
+        const redis = redisPool.getClient();
+        const lockId = `${process.env.HOSTNAME || 'unknown'}-${Date.now()}`;
+
+        // 使用SET NX获取锁
+        const acquired = await redis.set(
+            PRECISE_CLEANUP_LOCK_KEY,
+            lockId,
+            'EX',
+            CLEANUP_LOCK_TTL,
+            'NX'
+        );
+
+        if (!acquired) {
+            logger.debug('Precise cleanup already running in another instance, skipping this cycle');
+            return;
+        }
+
+        logger.debug({
+            lockId,
+            key: PRECISE_CLEANUP_LOCK_KEY,
+            ttl: CLEANUP_LOCK_TTL
+        }, 'Precise cleanup lock acquired');
+
         try {
             // 查找最近3分钟内完成的任务（避免重复检查老任务）
             const completedTasks = await prisma.task.findMany({
@@ -136,6 +170,17 @@ export class CleanupService {
             logger.error({
                 error: error instanceof Error ? error.message : 'Unknown error'
             }, 'Error in precise cleanup check');
+        } finally {
+            // 释放锁（使用Lua脚本确保只释放自己的锁）
+            const luaScript = `
+                if redis.call("get", KEYS[1]) == ARGV[1] then
+                    return redis.call("del", KEYS[1])
+                else
+                    return 0
+                end
+            `;
+            await redis.eval(luaScript, 1, PRECISE_CLEANUP_LOCK_KEY, lockId);
+            logger.debug('Precise cleanup lock released');
         }
     }
 
@@ -398,14 +443,32 @@ print(f'Container cleanup result: {result}')
 
     /**
      * 执行清理操作
+     * 使用Redis分布式锁防止多实例同时执行清理
      */
     private static async performCleanup(): Promise<void> {
-        if (this.isRunning) {
-            logger.debug('Cleanup already running, skipping this cycle');
+        // 获取分布式锁
+        const redis = redisPool.getClient();
+        const lockId = `${process.env.HOSTNAME || 'unknown'}-${Date.now()}`;
+
+        // 使用SET NX获取锁
+        const acquired = await redis.set(
+            CLEANUP_LOCK_KEY,
+            lockId,
+            'EX',
+            CLEANUP_LOCK_TTL,
+            'NX'
+        );
+
+        if (!acquired) {
+            logger.debug('Cleanup already running in another instance, skipping this cycle');
             return;
         }
 
-        this.isRunning = true;
+        logger.debug({
+            lockId,
+            key: CLEANUP_LOCK_KEY,
+            ttl: CLEANUP_LOCK_TTL
+        }, 'Cleanup lock acquired');
 
         try {
             const jobsDir = ECS_LOCAL_PATHS.JOBS;
@@ -418,7 +481,7 @@ print(f'Container cleanup result: {result}')
             const taskDirs = await fs.promises.readdir(jobsDir);
             const now = Date.now();
             const cleanupThreshold = DeploymentModeService.getCleanupInterval() * 1000; // 转换为毫秒
-            
+
             let cleanedCount = 0;
             let totalSize = 0;
 
@@ -433,14 +496,14 @@ print(f'Container cleanup result: {result}')
 
                     // 检查任务元数据
                     const metadata = await EcsLocalStorageService.getTaskMetadata(taskId);
-                    
+
                     if (metadata) {
                         // 如果有完成时间，使用完成时间计算
                         const completedAt = metadata.completedAt ? new Date(metadata.completedAt).getTime() : null;
                         const createdAt = metadata.createdAt ? new Date(metadata.createdAt).getTime() : stats.ctimeMs;
-                        
+
                         const referenceTime = completedAt || createdAt;
-                        
+
                         if (now - referenceTime > cleanupThreshold) {
                             // 验证清理条件：只在以下三种情况下清理
                             const cleanupReason = await this.validateCleanupConditions(taskId, metadata);
@@ -509,7 +572,16 @@ print(f'Container cleanup result: {result}')
                 error: error instanceof Error ? error.message : 'Unknown error'
             }, 'Cleanup service error');
         } finally {
-            this.isRunning = false;
+            // 释放锁（使用Lua脚本确保只释放自己的锁）
+            const luaScript = `
+                if redis.call("get", KEYS[1]) == ARGV[1] then
+                    return redis.call("del", KEYS[1])
+                else
+                    return 0
+                end
+            `;
+            await redis.eval(luaScript, 1, CLEANUP_LOCK_KEY, lockId);
+            logger.debug('Cleanup lock released');
         }
     }
 

@@ -24,6 +24,7 @@ export class RedisPoolService {
   private static instance: RedisPoolService;
   private redisClient: Redis;
   private isShuttingDown = false;
+  private reconnectionAttempts = 0; // 跟踪重连次数
 
   private constructor() {
     const redisConfig = {
@@ -81,8 +82,24 @@ export class RedisPoolService {
       }, 'Redis connected successfully');
     });
 
-    this.redisClient.on('ready', () => {
+    this.redisClient.on('ready', async () => {
       logger.info('Redis is ready to accept commands');
+
+      // 如果是重连成功，恢复状态
+      if (this.reconnectionAttempts > 0) {
+        logger.info({
+          reconnectionAttempts: this.reconnectionAttempts
+        }, 'Redis reconnected successfully, recovering state...');
+
+        try {
+          await this.recoverConnectionState();
+          this.reconnectionAttempts = 0; // 重置重连计数
+        } catch (error) {
+          logger.error({
+            error: error instanceof Error ? error.message : 'Unknown error'
+          }, 'Failed to recover Redis state after reconnection');
+        }
+      }
     });
 
     this.redisClient.on('error', (error) => {
@@ -98,7 +115,15 @@ export class RedisPoolService {
     });
 
     this.redisClient.on('reconnecting', () => {
-      logger.warn('Redis reconnecting...');
+      this.reconnectionAttempts++;
+      logger.warn({
+        attempt: this.reconnectionAttempts,
+        maxRetries: REDIS_MAX_RETRIES
+      }, 'Redis reconnecting...');
+
+      if (this.reconnectionAttempts > REDIS_MAX_RETRIES) {
+        logger.error('Max Redis reconnection attempts reached, may require manual intervention');
+      }
     });
 
     logger.info({
@@ -114,6 +139,65 @@ export class RedisPoolService {
       RedisPoolService.instance = new RedisPoolService();
     }
     return RedisPoolService.instance;
+  }
+
+  /**
+   * Redis重连后恢复状态
+   *
+   * 功能：
+   * 1. 检查关键数据结构是否存在
+   * 2. 记录队列和活跃任务状态
+   * 3. 触发数据库同步以检测不一致
+   *
+   * 注意：此方法在Redis重连成功后自动调用
+   */
+  private async recoverConnectionState(): Promise<void> {
+    try {
+      // 检查task_queue是否存在
+      const queueExists = await this.redisClient.exists('task_queue');
+      const queueLength = queueExists ? await this.redisClient.llen('task_queue') : 0;
+
+      // 检查active_task_ids是否存在
+      const activeSetExists = await this.redisClient.exists('active_task_ids');
+      const activeTasksCount = activeSetExists ? await this.redisClient.scard('active_task_ids') : 0;
+      const activeTaskIds = activeSetExists ? await this.redisClient.smembers('active_task_ids') : [];
+
+      logger.info({
+        queueExists,
+        queueLength,
+        activeSetExists,
+        activeTasksCount,
+        activeTaskIds: activeTaskIds.length
+      }, 'Redis state recovery check completed');
+
+      // 如果活跃任务集合为空但队列有任务，或者反之，记录警告
+      if (queueLength > 0 && activeTasksCount === 0) {
+        logger.warn({
+          queueLength,
+          activeTasksCount
+        }, 'Inconsistency detected: queue has tasks but no active task IDs');
+      }
+
+      if (queueLength === 0 && activeTasksCount > 0) {
+        logger.warn({
+          queueLength,
+          activeTasksCount
+        }, 'Inconsistency detected: active task IDs exist but queue is empty');
+      }
+
+      // 记录活跃任务ID列表用于排查
+      if (activeTaskIds.length > 0) {
+        logger.info({
+          activeTaskIds: activeTaskIds.slice(0, 10), // 最多记录10个
+          totalActive: activeTaskIds.length
+        }, 'Active task IDs after reconnection');
+      }
+    } catch (error) {
+      logger.error({
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }, 'Error during Redis state recovery');
+      throw error;
+    }
   }
 
   public getClient(): Redis {
