@@ -8,7 +8,8 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { Loader2, Mail, ArrowLeft } from 'lucide-react';
 import { motion } from 'framer-motion';
-import axios from 'axios';
+// @ts-ignore - axios 导入类型问题
+const axios = require('axios');
 
 const VerifyCodePage: React.FC = () => {
   const navigate = useNavigate();

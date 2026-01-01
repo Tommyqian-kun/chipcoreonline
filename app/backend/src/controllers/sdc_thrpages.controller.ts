@@ -606,6 +606,11 @@ export const submitTask = async (req: Request, res: Response) => {
     const { taskId } = req.params;
     const userId = req.user?.id;
 
+    // 验证用户ID
+    if (!userId) {
+      return res.status(401).json({ error: '未授权访问' });
+    }
+
     // 创建操作日志记录器
     operationLogger = createOperationLogger(taskId, 'submission');
 

@@ -17,7 +17,7 @@ export interface EnhancedFileUploadProps {
     maxSizeBytes?: number;
     required?: boolean;
     toolType?: 'sdc' | 'upf'; // 用于工具特定验证
-    onFileChange: (file: File | null) => void;
+    onFileChange: (file: File | null | undefined) => void;
     onValidationChange: (isValid: boolean, error?: string) => void;
     field: any; // react-hook-form field
     // 新增：用于ModName一致性检查

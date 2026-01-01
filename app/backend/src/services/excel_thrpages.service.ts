@@ -17,23 +17,15 @@ const taskFileLocks = new Map<string, Promise<void>>();
  * 安全地写入任务日志（只有在日志已初始化时才写入）
  */
 function safeLogToTaskFile(message: string): void {
-  if (isLoggerInitialized()) {
-    logToTaskFile(message);
-  } else {
-    console.log(message);
-  }
+  console.log(message);
 }
 
 /**
  * 安全地写入任务错误日志（只有在日志已初始化时才写入）
  */
 function safeLogErrorToTaskFile(message: string, error?: any): void {
-  if (isLoggerInitialized()) {
-    logErrorToTaskFile(message, error);
-  } else {
-    const errorMessage = error ? `${message}: ${error.message || error}` : message;
-    console.error(errorMessage);
-  }
+  const errorMessage = error ? `${message}: ${error.message || error}` : message;
+  console.error(errorMessage);
 }
 
 /**

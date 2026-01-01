@@ -240,15 +240,16 @@ const ToolsPage: React.FC = () => {
             revenue: 0, // 真实收入，暂无数据
             successRate: 0, // 真实成功率，暂无数据
             avgExecutionTime: 0, // 真实平均执行时间，暂无数据
-            errorRate: "0.0", // 真实错误率，暂无数据
+            errorRate: 0.0, // 真实错误率，暂无数据
             conversionRate: 0, // 真实转化率，暂无数据
             userRetentionRate: 0, // 真实用户留存率，暂无数据
-            customerSatisfaction: "0.0", // 真实客户满意度，暂无数据
-            usageGrowth: "0.0", // 真实使用增长率，暂无数据
-            revenueGrowth: "0.0", // 真实收入增长率，暂无数据
+            customerSatisfaction: 0.0, // 真实客户满意度，暂无数据
+            usageGrowth: 0.0, // 真实使用增长率，暂无数据
+            revenueGrowth: 0.0, // 真实收入增长率，暂无数据
             repeatUsageRate: 0, // 真实重复使用率，暂无数据
             featureAdoptionRate: 0, // 真实功能采用率，暂无数据
             resourceUtilization: 0, // 真实资源利用率，暂无数据
+            avgSessionTime: 0, // 平均使用时长，暂无数据
           };
         }
 
@@ -515,7 +516,7 @@ const ToolsPage: React.FC = () => {
               <CardContent>
                 <div className="text-2xl font-bold">
                   {Object.values(toolStats).length > 0
-                    ? (Object.values(toolStats).reduce((sum, stats) => sum + parseFloat(stats.customerSatisfaction), 0) / Object.values(toolStats).length).toFixed(1)
+                    ? (Object.values(toolStats).reduce((sum, stats) => sum + stats.customerSatisfaction, 0) / Object.values(toolStats).length).toFixed(1)
                     : 0}/5.0
                 </div>
                 <div className="flex items-center text-xs text-gray-500">
@@ -840,7 +841,7 @@ const ToolsPage: React.FC = () => {
               <CardContent>
                 <div className="text-2xl font-bold">
                   {Object.values(toolStats).length > 0
-                    ? (Object.values(toolStats).reduce((sum, stats) => sum + parseFloat(stats.errorRate), 0) / Object.values(toolStats).length).toFixed(1)
+                    ? (Object.values(toolStats).reduce((sum, stats) => sum + stats.errorRate, 0) / Object.values(toolStats).length).toFixed(1)
                     : 0}%
                 </div>
                 <p className="text-xs text-muted-foreground">系统错误率</p>
@@ -930,7 +931,7 @@ const ToolsPage: React.FC = () => {
                   if (stats.resourceUtilization > 90) {
                     suggestions.push({ type: 'info', text: '资源利用率高，考虑扩容或负载均衡' });
                   }
-                  if (parseFloat(stats.errorRate) > 3) {
+                  if (stats.errorRate > 3) {
                     suggestions.push({ type: 'error', text: '错误率偏高，需要排查系统稳定性问题' });
                   }
 

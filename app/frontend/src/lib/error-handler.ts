@@ -1,6 +1,22 @@
-import { AxiosError } from 'axios';
-
 // 简单的toast实现，可以后续替换为更完善的toast组件
+
+// 类型定义：Axios错误
+interface AxiosError<T = any> extends Error {
+  config?: any;
+  code?: string;
+  request?: any;
+  response?: {
+    data: T;
+    status: number;
+    headers: any;
+  };
+  isAxiosError: boolean;
+  toJSON(): object;
+}
+
+function isAxiosError<T = any>(error: any): error is AxiosError<T> {
+  return error && error.isAxiosError === true;
+}
 const toast = {
   error: (message: string) => {
     console.error('Toast Error:', message);

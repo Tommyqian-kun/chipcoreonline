@@ -386,10 +386,6 @@ export const getTasks = async (params: PaginationParams & {
       skip,
       take: limit,
       orderBy: { createdAt: 'desc' },
-      include: {
-        user: { select: { id: true, email: true, name: true } },
-        tool: { select: { id: true, name: true, description: true } },
-      },
       select: {
         id: true,
         status: true,
@@ -403,8 +399,8 @@ export const getTasks = async (params: PaginationParams & {
         finishedAt: true,
         createdAt: true,
         updatedAt: true,
-        user: true,
-        tool: true,
+        user: { select: { id: true, email: true, name: true } },
+        tool: { select: { id: true, name: true, description: true } },
         parameters: true
       }
     }),
@@ -1024,7 +1020,7 @@ export const getToolsAnalytics = async () => {
 
     // 计算收入（基于使用该工具的付费用户）
     const revenue = tasks.reduce((sum, task) => {
-      const planPrice = task.user?.subscription?.plan?.priceMonth || 0;
+      const planPrice = Number(task.user?.subscription?.plan?.priceMonth || 0);
       return sum + (planPrice * 0.1); // 假设每次使用贡献10%的月费
     }, 0);
 
@@ -1054,11 +1050,11 @@ export const getToolsAnalytics = async () => {
         // 商业分析数据（基于真实数据计算，暂无数据时显示0）
         conversionRate: 0, // 需要实际转化数据
         userRetentionRate: 0, // 需要实际留存数据
-        customerSatisfaction: "0.0", // 需要实际满意度数据
+        customerSatisfaction: 0.0, // 需要实际满意度数据
 
         // 趋势数据（需要历史数据支持，暂无数据时显示0）
-        usageGrowth: "0.0", // 需要历史使用数据对比
-        revenueGrowth: "0.0", // 需要历史收入数据对比
+        usageGrowth: 0.0, // 需要历史使用数据对比
+        revenueGrowth: 0.0, // 需要历史收入数据对比
 
         // 行为数据（基于真实数据计算，暂无数据时显示0）
         repeatUsageRate: 0, // 需要用户重复使用数据
@@ -1208,7 +1204,7 @@ export const getSystemMetrics = async () => {
       timestamp: new Date().toISOString()
     };
   } catch (error) {
-    logger.error('Failed to get system metrics:', error);
+    logger.error({ error }, 'Failed to get system metrics');
     throw error;
   }
 };
@@ -1243,7 +1239,7 @@ export const getSystemResources = async () => {
         usagePercent: (used / total) * 100
       };
     } catch (error) {
-      logger.warn('Failed to get disk usage:', error);
+      logger.warn({ error }, 'Failed to get disk usage');
     }
 
     // 获取目录大小
@@ -1278,7 +1274,7 @@ export const getSystemResources = async () => {
       timestamp: new Date().toISOString()
     };
   } catch (error) {
-    logger.error('Failed to get system resources:', error);
+    logger.error({ error }, 'Failed to get system resources');
     throw error;
   }
 };

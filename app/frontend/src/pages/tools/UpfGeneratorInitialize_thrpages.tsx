@@ -255,7 +255,7 @@ const UpfGeneratorInitializeThrpages: React.FC = () => {
             formData.append('pcellYamlFile', pcellYamlFile);
 
             // api拦截器会自动处理FormData的Content-Type
-            const response = await api.post<{ success: boolean; message: string; taskId: string }>('/upf-thrpages/initialize', formData);
+            const response = await api.post('/upf-thrpages/initialize', formData);
             const result = response.data;
 
             toast({

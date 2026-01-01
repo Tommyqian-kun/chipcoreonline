@@ -100,7 +100,7 @@ export class ToolMappingService {
 
       logger.info(`✅ Tool mappings initialized: ${this.toolMappings.size} tools, ${this.typeMapping.size} types`);
     } catch (error) {
-      logger.error('❌ Failed to initialize tool mappings:', error);
+      logger.error({ error }, '❌ Failed to initialize tool mappings:');
       this.initialized = false;
       throw error;
     }
@@ -122,7 +122,7 @@ export class ToolMappingService {
       logger.warn(`No mapping found for frontend name: ${frontendName}`);
       return null;
     } catch (error) {
-      logger.error(`Error getting tool ID for frontend name ${frontendName}:`, error);
+      logger.error({ error }, `Error getting tool ID for frontend name ${frontendName}:`);
       return null;
     }
   }
@@ -143,7 +143,7 @@ export class ToolMappingService {
       logger.warn(`No mapping found for database ID: ${databaseId}`);
       return null;
     } catch (error) {
-      logger.error(`Error getting tool type for database ID ${databaseId}:`, error);
+      logger.error({ error }, `Error getting tool type for database ID ${databaseId}:`);
       return null;
     }
   }
@@ -249,7 +249,7 @@ export class ToolMappingService {
       logger.debug(`Found ${mappings.length} tools for type: ${toolType}`);
       return [...mappings]; // 返回副本以防止外部修改
     } catch (error) {
-      logger.error(`Error getting tools by type ${toolType}:`, error);
+      logger.error({ error }, `Error getting tools by type ${toolType}:`);
       return [];
     }
   }
@@ -278,7 +278,7 @@ export class ToolMappingService {
         errors
       };
     } catch (error) {
-      logger.error('Error in batch tool mapping query:', error);
+      logger.error({ error }, 'Error in batch tool mapping query:');
       return {
         success: false,
         mappings: [],

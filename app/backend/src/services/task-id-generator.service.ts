@@ -94,14 +94,14 @@ export class TaskIdGeneratorService {
                 }
                 
             } catch (error) {
-                logger.error(`Error generating TaskID attempt ${attempts}:`, error);
+                logger.error({ error }, `Error generating TaskID attempt ${attempts}`);
                 
                 // 清理可能的残留数据
                 try {
                     await redisClient.del(lockKey);
                     await redisClient.srem(this.REDIS_TASKID_SET, candidateId);
                 } catch (cleanupError: unknown) {
-                    logger.error('Error during TaskID generation cleanup:', cleanupError);
+                    logger.error({ error: cleanupError }, 'Error during TaskID generation cleanup');
                 }
 
                 if (attempts === this.MAX_RETRY_ATTEMPTS) {
@@ -126,7 +126,7 @@ export class TaskIdGeneratorService {
             await redisPool.getClient().srem(this.REDIS_TASKID_SET, taskId);
             logger.debug(`Cleaned up TaskID from active set: ${taskId}`);
         } catch (error) {
-            logger.error(`Error cleaning up TaskID ${taskId}:`, error);
+            logger.error({ error }, `Error cleaning up TaskID ${taskId}`);
         }
     }
     
@@ -138,7 +138,7 @@ export class TaskIdGeneratorService {
             // 使用静态导入的redisPool
             return await redisPool.getClient().scard(this.REDIS_TASKID_SET);
         } catch (error) {
-            logger.error('Error getting active task count:', error);
+            logger.error({ error }, 'Error getting active task count');
             return 0;
         }
     }
@@ -188,7 +188,7 @@ export class TaskIdGeneratorService {
             }
             
         } catch (error) {
-            logger.error('Error during expired TaskID cleanup:', error);
+            logger.error({ error }, 'Error during expired TaskID cleanup');
         }
     }
 }

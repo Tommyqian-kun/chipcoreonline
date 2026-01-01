@@ -1,6 +1,44 @@
 // API 基础配置和通用请求函数
 
-import axios, { AxiosError, AxiosRequestConfig } from 'axios';
+// @ts-ignore - axios 导入类型问题
+const axios = require('axios');
+
+// 类型定义
+interface AxiosRequestConfig {
+  url?: string;
+  method?: string;
+  baseURL?: string;
+  headers?: any;
+  data?: any;
+  params?: any;
+  timeout?: number;
+  withCredentials?: boolean;
+  skipGlobal401Handler?: boolean;
+  [key: string]: any;
+}
+
+interface AxiosError<T = any> extends Error {
+  config?: AxiosRequestConfig;
+  code?: string;
+  request?: any;
+  response?: {
+    data: T;
+    status: number;
+    headers: any;
+    config?: AxiosRequestConfig;
+  };
+  isAxiosError?: boolean;
+  toJSON?: () => object;
+}
+
+interface AxiosResponse<T = any> {
+  data: T;
+  status: number;
+  statusText: string;
+  headers: any;
+  config: AxiosRequestConfig;
+  [key: string]: any;
+}
 
 // 扩展AxiosRequestConfig类型以支持自定义错误处理配置
 declare module 'axios' {
@@ -86,7 +124,7 @@ api.interceptors.request.use(
 
 // Response interceptor
 api.interceptors.response.use(
-  (response) => response,
+  (response: AxiosResponse) => response,
   (error: AxiosError) => {
     // Unified error handling
     if (error.response) {

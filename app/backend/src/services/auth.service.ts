@@ -200,7 +200,14 @@ export const loginUser = async (email: string, password: string): Promise<{ toke
 
   const { password: userPassword, ...userWithoutPassword } = user;
 
-  return { token, user: userWithoutPassword };
+  // 转换 createdAt 为字符串以匹配返回类型
+  return {
+    token,
+    user: {
+      ...userWithoutPassword,
+      createdAt: userWithoutPassword.createdAt.toISOString()
+    }
+  };
 };
 
 export const resendVerificationEmail = async (email: string): Promise<boolean> => {

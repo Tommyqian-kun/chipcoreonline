@@ -4,7 +4,7 @@ import { getTaskProgress, getProgressDescription } from '@/utils/taskProgress';
 
 interface TaskProgressBarProps {
   status: string;
-  currentStep?: string;
+  currentStep?: string | null;
   taskId?: string | null;
   variant?: 'default' | 'compact';
   className?: string;
