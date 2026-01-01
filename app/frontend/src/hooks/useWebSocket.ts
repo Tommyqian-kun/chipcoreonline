@@ -13,7 +13,7 @@ interface WebSocketHookOptions {
  * WebSocket Hook - 实现实时任务状态更新
  */
 export const useWebSocket = (options: WebSocketHookOptions = {}) => {
-  const { user, token } = useAuth();
+  const { user } = useAuth();
   const { toast } = useToast();
   const socketRef = useRef<Socket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -38,10 +38,7 @@ export const useWebSocket = (options: WebSocketHookOptions = {}) => {
     console.log('🌐 WebSocket connecting to:', API_BASE);
 
     socketRef.current = io(API_BASE, {
-      withCredentials: true, // 重要：允许发送Cookie
-      auth: {
-        token: token // 传递认证token
-      },
+      withCredentials: true, // 重要：允许发送Cookie，通过Cookie认证
       transports: ['websocket', 'polling'],
       timeout: 10000,
       reconnection: true,
@@ -118,7 +115,7 @@ export const useWebSocket = (options: WebSocketHookOptions = {}) => {
       }
     });
 
-  }, [user, token, onTaskStatusUpdate, onQueueUpdate, onError, toast]);
+  }, [user, onTaskStatusUpdate, onQueueUpdate, onError, toast]);
 
   // 断开连接
   const disconnect = useCallback(() => {

@@ -49,7 +49,7 @@ export const TASK_PROGRESS_MAPPING = {
 } as const;
 
 // 获取任务进度
-export const getTaskProgress = (status: string, currentStep?: string): number => {
+export const getTaskProgress = (status: string, currentStep?: string | null): number => {
   // 优先使用currentStep显示实际执行进度
   if (currentStep && TASK_PROGRESS_MAPPING[currentStep as keyof typeof TASK_PROGRESS_MAPPING]) {
     return TASK_PROGRESS_MAPPING[currentStep as keyof typeof TASK_PROGRESS_MAPPING];
@@ -65,7 +65,7 @@ export const getTaskProgress = (status: string, currentStep?: string): number =>
 };
 
 // 获取进度描述
-export const getProgressDescription = (status: string, currentStep?: string): string => {
+export const getProgressDescription = (status: string, currentStep?: string | null): string => {
   const progressDescriptions = {
     'VALIDATING': '验证任务参数和用户权限',
     'QUEUE_CHECKING': '检查队列容量',

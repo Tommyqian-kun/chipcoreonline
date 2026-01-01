@@ -3,12 +3,28 @@ import 'express-async-errors'; // Must be imported first
 import './envLoader';
 // 环境变量验证 - 必须在envLoader之后引入
 import { env } from './config/env-validation';
-import express from 'express';
+import express, { type RequestHandler } from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
+
+/**
+ * 类型安全的 rate limit 中间件包装器
+ * 解决 express-rate-limit 与 @types/express 版本兼容性问题
+ */
+const wrapRateLimit = (limiter: ReturnType<typeof rateLimit>): RequestHandler => {
+  return limiter as unknown as RequestHandler;
+};
+
+/**
+ * 类型安全的中间件包装器
+ * 解决第三方中间件与 @types/express 版本兼容性问题
+ */
+const wrapMiddleware = (middleware: any): RequestHandler => {
+  return middleware as unknown as RequestHandler;
+};
 import { initializeWebSocket } from './services/websocket.service';
 import { initializeMonitoring } from './services/monitoring.service';
 import { initializeBackupService } from './services/backup.service';
@@ -108,7 +124,7 @@ async function startServer() {
     legacyHeaders: false,
   });
 
-  app.use(generalLimiter);
+  app.use(wrapRateLimit(generalLimiter));
 
   // Request logging middleware
   app.use(requestLogger);
@@ -121,13 +137,13 @@ async function startServer() {
     exposedHeaders: ['Content-Disposition'], // 暴露Content-Disposition头给前端
   }));
   app.use(express.json({ limit: '10mb' }));
-  app.use(cookieParser());
+  app.use(wrapMiddleware(cookieParser()));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
   // --- API Routes ---
   const apiV1Router = express.Router();
-  
-  apiV1Router.use('/auth', authLimiter, authRoutes);
+
+  apiV1Router.use('/auth', wrapRateLimit(authLimiter), authRoutes);
   apiV1Router.use('/users', userRoutes);
   apiV1Router.use('/plans', planRoutes);
   apiV1Router.use('/orders', orderRoutes);
@@ -267,8 +283,7 @@ async function startServer() {
   // Initialize SDC multi-page database schema if needed
   try {
     const { ExcelThrpagesService } = await import('./services/excel_thrpages.service');
-    const { PrismaClient } = await import('@prisma/client');
-    const prisma = new PrismaClient();
+    const { prisma } = await import('./utils/database');
 
     // Check if SDC schema is already initialized
     const existingSdcSheets = await prisma.sheet.findMany({
@@ -282,17 +297,15 @@ async function startServer() {
     } else {
       logger.info(`✅ SDC multi-page database schema already exists (${existingSdcSheets.length} sheets)`);
     }
-
-    await prisma.$disconnect();
+    // 不需要$disconnect()，使用共享的prisma实例
   } catch (error) {
-    logger.error('❌ Failed to initialize SDC multi-page database schema:', error);
+    logger.error({ error }, '❌ Failed to initialize SDC multi-page database schema');
   }
 
   // Initialize UPF multi-page database schema if needed
   try {
     const { ExcelThrpagesService } = await import('./services/excel_thrpages.service');
-    const { PrismaClient } = await import('@prisma/client');
-    const prisma = new PrismaClient();
+    const { prisma } = await import('./utils/database');
 
     // Check if UPF schema is already initialized
     const existingUpfSheets = await prisma.sheet.findMany({
@@ -306,10 +319,9 @@ async function startServer() {
     } else {
       logger.info(`✅ UPF multi-page database schema already exists (${existingUpfSheets.length} sheets)`);
     }
-
-    await prisma.$disconnect();
+    // 不需要$disconnect()，使用共享的prisma实例
   } catch (error) {
-    logger.error('❌ Failed to initialize UPF multi-page database schema:', error);
+    logger.error({ error }, '❌ Failed to initialize UPF multi-page database schema');
     // 不要阻塞启动，继续执行
   }
 
@@ -318,7 +330,7 @@ async function startServer() {
     await ToolMappingService.initialize();
     logger.info('✅ Tool mapping service initialized successfully');
   } catch (error) {
-    logger.error('❌ Failed to initialize tool mapping service:', error);
+    logger.error({ error }, '❌ Failed to initialize tool mapping service');
   }
 
   // Initialize task timeout monitoring
@@ -350,6 +362,19 @@ async function startServer() {
     logger.info('✅ Task log cleanup service started successfully');
   } catch (error) {
     logger.error({ error }, '❌ Failed to start task log cleanup service');
+  }
+
+  // 【新增】Initialize user concurrent state sync
+  // 从数据库同步活跃任务的用户并发状态到Redis
+  try {
+    const { userConcurrentCheck } = await import('./services/user-concurrent-check.service');
+    const syncResult = await userConcurrentCheck.syncFromDatabase();
+    logger.info({
+      syncedUsers: syncResult.syncedUsers,
+      totalSlotsSynced: syncResult.totalSlotsSynced
+    }, '✅ User concurrent state sync completed');
+  } catch (error) {
+    logger.error({ error }, '❌ Failed to sync user concurrent state');
   }
 
   // --- Global Error Handler ---

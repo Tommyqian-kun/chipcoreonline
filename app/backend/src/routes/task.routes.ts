@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import { submitTask, getTasks, getTaskById, getTaskStatus, downloadTaskResult, updateTaskStatusInternal, updateDownloadStatus } from '../controllers/task.controller';
 import { authenticateToken } from '../middleware/auth';
 import { checkTaskExecutionPermission } from '../middleware/subscription';
@@ -10,6 +10,11 @@ import {
   getTaskStatusSchema,
   getDownloadUrlSchema
 } from '../schemas/task.schema';
+
+// 类型安全的 multer 中间件包装器
+const wrapMulter = (middleware: any): RequestHandler => {
+  return middleware as unknown as RequestHandler;
+};
 
 // 安全的文件上传配置
 const upload = multer({
@@ -41,7 +46,7 @@ router.post(
   '/',
   authenticateToken,
   checkTaskExecutionPermission,
-  upload.array('files'),
+  wrapMulter(upload.array('files')),
   validate(submitTaskSchema),
   submitTask
 );

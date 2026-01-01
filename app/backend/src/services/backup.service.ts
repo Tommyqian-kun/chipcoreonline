@@ -455,8 +455,9 @@ export class BackupService {
       const ossClient = getOssClient(this.backupConfig.ossBackupBucket);
       const result = await ossClient.list({
         prefix: 'full_',
-        delimiter: '/'
-      });
+        delimiter: '/',
+        'max-keys': '1000'
+      }, {} as any);
 
       const backups = result.prefixes?.map(prefix => {
         const backupId = prefix.replace('/', '');

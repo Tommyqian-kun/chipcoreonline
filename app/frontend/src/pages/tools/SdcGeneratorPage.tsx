@@ -280,7 +280,7 @@ const SdcGeneratorPage: React.FC = () => {
 
         try {
             // 设置检查状态
-            setTaskStatus(prev => ({ ...prev, status: 'VALIDATING' }));
+            setTaskStatus((prev: TaskStatus) => ({ ...prev, status: 'VALIDATING' }));
 
 
 
@@ -356,7 +356,7 @@ const SdcGeneratorPage: React.FC = () => {
             });
 
             // 重置状态
-            setTaskStatus(prev => ({ ...prev, status: 'IDLE' }));
+            setTaskStatus((prev: TaskStatus) => ({ ...prev, status: 'IDLE' }));
         }
     };
 

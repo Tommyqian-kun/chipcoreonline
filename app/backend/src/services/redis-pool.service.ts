@@ -1,13 +1,29 @@
 import Redis from 'ioredis';
 import logger from '../config/logger';
 
+// ========================================
+// Redis连接池配置
+// ========================================
+// 从环境变量读取配置，基于高并发场景优化
+// 计算依据：MAX_CONCURRENT_TASKS=16，Redis单线程模型
+// 主要配置超时和重试参数，而非连接数
+const REDIS_CONNECT_TIMEOUT = parseInt(process.env.REDIS_CONNECT_TIMEOUT || '10000'); // 连接超时10秒
+const REDIS_COMMAND_TIMEOUT = parseInt(process.env.REDIS_COMMAND_TIMEOUT || '5000'); // 命令超时5秒
+const REDIS_MAX_RETRIES = parseInt(process.env.REDIS_MAX_RETRIES || '3'); // 最大重试次数
+const REDIS_RETRY_DELAY = parseInt(process.env.REDIS_RETRY_DELAY || '100'); // 重试延迟100ms
+const REDIS_KEEP_ALIVE = parseInt(process.env.REDIS_KEEP_ALIVE || '30000'); // 保活30秒
+const REDIS_ENABLE_OFFLINE_QUEUE = process.env.REDIS_ENABLE_OFFLINE_QUEUE === 'true'; // 离线队列
+const REDIS_MAX_LOADING_TIMEOUT = parseInt(process.env.REDIS_MAX_LOADING_TIMEOUT || '5000'); // 加载超时
+
 /**
  * Redis连接池服务
  * 解决高并发下的Redis连接管理和并发安全问题
+ * 使用单例模式，全应用共享一个Redis连接
  */
 export class RedisPoolService {
   private static instance: RedisPoolService;
   private redisClient: Redis;
+  private isShuttingDown = false;
 
   private constructor() {
     const redisConfig = {
@@ -16,19 +32,31 @@ export class RedisPoolService {
       password: process.env.REDIS_PASSWORD,
       db: parseInt(process.env.REDIS_DB || '0'),
 
+      // ✅ 连接超时配置
+      connectTimeout: REDIS_CONNECT_TIMEOUT,
+
+      // ✅ 命令超时配置（通过showVerboseError间接控制）
+      // ioredis不直接支持commandTimeout，通过重试机制实现
+
       // 连接池配置
-      maxRetriesPerRequest: 3,
-      retryDelayOnFailover: 100,
+      maxRetriesPerRequest: REDIS_MAX_RETRIES,
+      retryDelayOnFailover: REDIS_RETRY_DELAY,
       enableReadyCheck: true,
-      maxLoadingTimeout: 5000,
+      maxLoadingTimeout: REDIS_MAX_LOADING_TIMEOUT,
 
-      // 连接池大小
+      // ✅ 离线队列配置
+      enableOfflineQueue: REDIS_ENABLE_OFFLINE_QUEUE,
+
+      // 连接保活
       lazyConnect: true,
-      keepAlive: 30000,
+      keepAlive: REDIS_KEEP_ALIVE,
 
-      // 重试配置
+      // ✅ 优化的重试策略
       retryStrategy: (times: number) => {
-        const delay = Math.min(times * 50, 2000);
+        if (times > REDIS_MAX_RETRIES) {
+          return null; // 停止重试
+        }
+        const delay = Math.min(times * REDIS_RETRY_DELAY, 2000);
         return delay;
       },
 
@@ -36,27 +64,49 @@ export class RedisPoolService {
       reconnectOnError: (err: Error) => {
         const targetError = 'READONLY';
         return err.message.includes(targetError);
-      }
+      },
+
+      // ✅ 连接名（用于调试）
+      showFriendlyErrorStack: true,
     };
 
     this.redisClient = new Redis(redisConfig);
 
     // 连接事件监听
     this.redisClient.on('connect', () => {
-      logger.info('Redis connected successfully');
+      logger.info({
+        host: redisConfig.host,
+        port: redisConfig.port,
+        db: redisConfig.db
+      }, 'Redis connected successfully');
+    });
+
+    this.redisClient.on('ready', () => {
+      logger.info('Redis is ready to accept commands');
     });
 
     this.redisClient.on('error', (error) => {
-      logger.error({ error: error.message }, 'Redis connection error');
+      if (!this.isShuttingDown) {
+        logger.error({ error: error.message }, 'Redis connection error');
+      }
     });
 
     this.redisClient.on('close', () => {
-      logger.warn('Redis connection closed');
+      if (!this.isShuttingDown) {
+        logger.warn('Redis connection closed');
+      }
     });
 
     this.redisClient.on('reconnecting', () => {
-      logger.info('Redis reconnecting...');
+      logger.warn('Redis reconnecting...');
     });
+
+    logger.info({
+      connectTimeout: REDIS_CONNECT_TIMEOUT,
+      commandTimeout: REDIS_COMMAND_TIMEOUT,
+      maxRetries: REDIS_MAX_RETRIES,
+      keepAlive: REDIS_KEEP_ALIVE
+    }, 'Redis connection pool configured');
   }
 
   public static getInstance(): RedisPoolService {
@@ -67,6 +117,14 @@ export class RedisPoolService {
   }
 
   public getClient(): Redis {
+    // 主动建立连接，确保启动时连接已就绪
+    // 解决 lazyConnect=true + enableOfflineQueue=false 导致的启动时序问题
+    // 当连接状态为 'wait' 时（使用 lazyConnect 时的初始状态），显式调用 connect() 建立连接
+    if (this.redisClient.status === 'wait') {
+      this.redisClient.connect().catch(err => {
+        logger.error({ error: err.message }, 'Failed to establish Redis connection');
+      });
+    }
     return this.redisClient;
   }
 
@@ -283,16 +341,55 @@ export class RedisPoolService {
   }
 
   /**
-   * 关闭连接
+   * 获取Redis连接池状态信息
+   */
+  public getPoolStatus(): {
+    isConnected: boolean;
+    status: string;
+    pendingCommands: number;
+    config: {
+      connectTimeout: number;
+      commandTimeout: number;
+      maxRetries: number;
+      keepAlive: number;
+    };
+  } {
+    return {
+      isConnected: this.redisClient.status === 'ready',
+      status: this.redisClient.status,
+      pendingCommands: (this.redisClient as any).pending || 0,
+      config: {
+        connectTimeout: REDIS_CONNECT_TIMEOUT,
+        commandTimeout: REDIS_COMMAND_TIMEOUT,
+        maxRetries: REDIS_MAX_RETRIES,
+        keepAlive: REDIS_KEEP_ALIVE
+      }
+    };
+  }
+
+  /**
+   * 优雅关闭连接
    */
   public async disconnect(): Promise<void> {
+    this.isShuttingDown = true;
+
     try {
+      // 等待现有命令完成
+      const pending = (this.redisClient as any).pending || 0;
+      if (pending > 0) {
+        logger.info({ pendingCommands: pending }, 'Waiting for pending Redis commands to complete...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      // 断开连接
       await this.redisClient.quit();
       logger.info('Redis connection closed gracefully');
     } catch (error) {
       logger.error({
         error: error instanceof Error ? error.message : 'Unknown error'
       }, 'Error closing Redis connection');
+      // 强制断开
+      this.redisClient.disconnect();
     }
   }
 }

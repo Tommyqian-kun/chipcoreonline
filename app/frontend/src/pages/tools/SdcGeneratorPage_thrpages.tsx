@@ -79,7 +79,7 @@ interface InitializeTaskResponse {
 }
 
 const SdcGeneratorPageThrpages: React.FC = () => {
-  const { handleGuidanceClick, handleTemplateDownload } = useToolPageNavigation(null);
+  const { handleGuidanceClick, handleTemplateDownload } = useToolPageNavigation({ status: 'IDLE' });
   const navigate = useNavigate();
   const { toast } = useToast();
   
@@ -139,7 +139,7 @@ const SdcGeneratorPageThrpages: React.FC = () => {
   };
 
   // 文件验证状态处理
-  const handleFileValidationChange = (fileType: 'hierYaml' | 'vlog') => (isValid: boolean, error: string) => {
+  const handleFileValidationChange = (fileType: 'hierYaml' | 'vlog') => (isValid: boolean, error?: string) => {
     setFileValidationStates(prev => ({
       ...prev,
       [fileType]: { isValid, error }
@@ -157,7 +157,7 @@ const SdcGeneratorPageThrpages: React.FC = () => {
 
       // 使用项目统一的api实例，正确配置baseURL和credentials
       // api拦截器会自动处理FormData的Content-Type
-      const response = await api.post<InitializeTaskResponse>('/sdc-thrpages/initialize', formData);
+      const response = await api.post('/sdc-thrpages/initialize', formData);
 
       return response.data;
     },
@@ -398,7 +398,7 @@ const SdcGeneratorPageThrpages: React.FC = () => {
                   <div className="flex flex-col sm:flex-row justify-between items-center space-y-4 sm:space-y-0 sm:space-x-4 pt-6">
                     {/* 左侧：任务历史按钮 */}
                     <div className="flex space-x-4">
-                      <ToolPageTaskHistoryButton toolName="sdc-generator" />
+                      <ToolPageTaskHistoryButton />
                     </div>
 
                     {/* 右侧：初始化按钮 */}

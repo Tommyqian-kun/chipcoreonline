@@ -138,7 +138,7 @@ export class FileSystemLockService {
   public static async checkDiskSpace(checkPath: string, requiredSpaceGB: number): Promise<boolean> {
     try {
       const stats = await fs.promises.statfs(checkPath);
-      const freeSpaceGB = (stats.bavail * stats.frsize) / (1024 ** 3);
+      const freeSpaceGB = (stats.bavail * (stats as any).frsize) / (1024 ** 3);
       
       const hasEnoughSpace = freeSpaceGB >= requiredSpaceGB;
       

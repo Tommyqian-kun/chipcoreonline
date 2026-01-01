@@ -5,6 +5,7 @@ import { z } from 'zod';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../utils/database'; // Import shared prisma instance
 import { JwtBlacklistService } from './jwt-blacklist.service';
+import { redisPool } from './redis-pool.service';
 
 // 生成6位数字验证码
 const generateVerificationCode = (): string => {
@@ -54,7 +55,7 @@ export const registerUser = async (email: string, password: string) => {
   const verificationCodeKey = `verification_code:${user.email}`;
 
   // 将验证码存入 Redis，有效期2分钟
-  const { redisPool } = await import('./redis-pool.service');
+  // 使用静态导入的redisPool
   await redisPool.getClient().set(verificationCodeKey, verificationCode, 'EX', 60 * 2);
 
   // 发送验证码邮件
@@ -65,7 +66,7 @@ export const registerUser = async (email: string, password: string) => {
 
 export const verifyEmail = async (token: string): Promise<boolean> => {
   const verificationTokenKey = `verification:${token}`;
-  const { redisPool } = await import('./redis-pool.service');
+  // 使用静态导入的redisPool
 
   const userId = await redisPool.getClient().get(verificationTokenKey);
 
@@ -89,7 +90,7 @@ export const verifyEmail = async (token: string): Promise<boolean> => {
 // 验证邮箱验证码
 export const verifyEmailCode = async (email: string, code: string): Promise<boolean> => {
   const verificationCodeKey = `verification_code:${email}`;
-  const { redisPool } = await import('./redis-pool.service');
+  // 使用静态导入的redisPool
 
   const storedCode = await redisPool.getClient().get(verificationCodeKey);
 
@@ -139,7 +140,7 @@ export const resendVerificationCode = async (email: string): Promise<boolean> =>
   const verificationCodeKey = `verification_code:${email}`;
 
   // 将验证码存入 Redis，有效期2分钟
-  const { redisPool } = await import('./redis-pool.service');
+  // 使用静态导入的redisPool
   await redisPool.getClient().set(verificationCodeKey, verificationCode, 'EX', 60 * 2);
 
   // 发送验证码邮件
@@ -199,7 +200,14 @@ export const loginUser = async (email: string, password: string): Promise<{ toke
 
   const { password: userPassword, ...userWithoutPassword } = user;
 
-  return { token, user: userWithoutPassword };
+  // 转换 createdAt 为字符串以匹配返回类型
+  return {
+    token,
+    user: {
+      ...userWithoutPassword,
+      createdAt: userWithoutPassword.createdAt.toISOString()
+    }
+  };
 };
 
 export const resendVerificationEmail = async (email: string): Promise<boolean> => {
@@ -219,7 +227,7 @@ export const resendVerificationEmail = async (email: string): Promise<boolean> =
   const verificationToken = crypto.randomBytes(32).toString('hex');
   const verificationTokenKey = `verification:${verificationToken}`;
   
-  const { redisPool } = await import('./redis-pool.service');
+  // 使用静态导入的redisPool
   await redisPool.getClient().set(verificationTokenKey, user.id, 'EX', 60 * 60 * 24);
 
   // 发送验证邮件
@@ -240,7 +248,7 @@ export const requestPasswordReset = async (email: string): Promise<boolean> => {
   const resetToken = crypto.randomBytes(32).toString('hex');
   const resetTokenKey = `password-reset:${resetToken}`;
   
-  const { redisPool } = await import('./redis-pool.service');
+  // 使用静态导入的redisPool
   await redisPool.getClient().set(resetTokenKey, user.id, 'EX', 60 * 60);
 
   // 发送密码重置邮件
@@ -251,7 +259,7 @@ export const requestPasswordReset = async (email: string): Promise<boolean> => {
 
 export const resetPassword = async (token: string, newPassword: string): Promise<boolean> => {
   const resetTokenKey = `password-reset:${token}`;
-  const { redisPool } = await import('./redis-pool.service');
+  // 使用静态导入的redisPool
 
   const userId = await redisPool.getClient().get(resetTokenKey);
 

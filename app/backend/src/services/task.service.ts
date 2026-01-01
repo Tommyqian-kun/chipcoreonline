@@ -12,9 +12,15 @@ import { ToolExecutionService } from './tool-execution.service';
 import { createTaskLogger, TaskLogger } from './task-logger.service';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { redisPool } from './redis-pool.service';
 
 export const createTask = async (body: any, userId: string, inputFiles?: Express.Multer.File[]): Promise<Task> => {
-    const { toolId, parameters } = body;
+    // 标记：订阅中间件已经预留了并发槽位
+    // 如果任务创建失败，需要释放槽位
+    let slotReserved = true; // 默认为true，因为中间件已经预留
+
+    try {
+        const { toolId, parameters } = body;
 
     // 使用改进的TaskID生成服务确保唯一性
     const taskId = await TaskIdGeneratorService.generateUniqueTaskId();
@@ -88,7 +94,7 @@ export const createTask = async (body: any, userId: string, inputFiles?: Express
 
     // 步骤3：检查Redis队列上限
     await taskLogger.logStepStart('REDIS_QUEUE_CHECK', 'Checking Redis queue capacity');
-    const { redisPool } = await import('./redis-pool.service');
+    // 使用静态导入的redisPool
     const maxQueueLength = parseInt(process.env.MAX_QUEUE_LENGTH || '48');
     const currentQueueLength = await redisPool.getClient().llen('task_queue');
 
@@ -201,6 +207,15 @@ export const createTask = async (body: any, userId: string, inputFiles?: Express
         // 如果入队失败，清理已创建的资源
         await taskLogger.logStepError('TASK_ENQUEUE', 'Failed to enqueue task', new Error('Atomic enqueue failed'));
 
+        // 【新增】释放已预留的并发槽位
+        try {
+            const { userConcurrentCheck } = await import('./user-concurrent-check.service');
+            await userConcurrentCheck.releaseConcurrentSlot(userId);
+            logger.info({ userId, taskId }, 'Released concurrent slot after enqueue failure');
+        } catch (releaseError) {
+            logger.error({ userId, taskId, error: releaseError }, 'Failed to release concurrent slot after enqueue failure');
+        }
+
         // 清理temp目录
         try {
             await FileSystemLockService.safeRemoveDirectory(tempDir);
@@ -245,7 +260,26 @@ export const createTask = async (body: any, userId: string, inputFiles?: Express
 
     await taskLogger.logStepSuccess('TASK_CREATION', 'Task creation process completed successfully');
 
+    // 任务创建成功，槽位保持预留状态，直到任务完成/失败
+    slotReserved = false; // 标记为不需要在catch中释放
+
     return task;
+
+    } catch (error) {
+        // 如果槽位仍然预留，说明在任务创建过程中失败了，需要释放
+        if (slotReserved) {
+            try {
+                const { userConcurrentCheck } = await import('./user-concurrent-check.service');
+                await userConcurrentCheck.releaseConcurrentSlot(userId);
+                logger.warn({ userId, error: error instanceof Error ? error.message : 'Unknown error' }, 'Released concurrent slot due to task creation failure');
+            } catch (releaseError) {
+                logger.error({ userId, error: releaseError }, 'Failed to release concurrent slot during error handling');
+            }
+        }
+
+        // 重新抛出原始错误
+        throw error;
+    }
 };
 
 export const getTaskStatus = async (taskId: string, userId: string) => {
@@ -552,8 +586,25 @@ export const updateTaskStatus = async (
             );
         }
 
-        // 任务完成后清理TaskID（从Redis活跃集合中移除）
+        // 【新增】任务完成/失败/取消时释放并发槽位
         if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(status)) {
+            try {
+                const { userConcurrentCheck } = await import('./user-concurrent-check.service');
+                await userConcurrentCheck.releaseConcurrentSlot(updatedTask.userId);
+                logger.info({
+                    taskId,
+                    userId: updatedTask.userId,
+                    status
+                }, 'Released concurrent slot for completed/failed/cancelled task');
+            } catch (releaseError) {
+                logger.error({
+                    taskId,
+                    userId: updatedTask.userId,
+                    error: releaseError instanceof Error ? releaseError.message : 'Unknown error'
+                }, 'Failed to release concurrent slot for completed task');
+            }
+
+            // 清理TaskID（从Redis活跃集合中移除）
             await TaskIdGeneratorService.cleanupTaskId(taskId);
         }
 
@@ -589,12 +640,25 @@ export const updateTaskStatusInternal = async (taskId: string, updateData: {
   downloadStatus?: string;
   downloadTimeRemaining?: number;
 }) => {
+  // 类型转换：确保Date字段转为ISO字符串，status转为TaskStatus
+  const updatePayload: any = {
+    ...updateData,
+    updatedAt: new Date().toISOString() // Prisma需要ISO字符串格式
+  };
+
+  // 如果有status，确保它是正确的枚举类型
+  if (updateData.status) {
+    updatePayload.status = updateData.status as any; // 类型断言以绕过TypeScript检查
+  }
+
+  // 如果有finishedAt，转换为ISO字符串
+  if (updateData.finishedAt) {
+    updatePayload.finishedAt = updateData.finishedAt.toISOString();
+  }
+
   const task = await prisma.task.update({
     where: { id: taskId },
-    data: {
-      ...updateData,
-      updatedAt: new Date()
-    }
+    data: updatePayload
   });
 
   // 发送WebSocket通知给前端

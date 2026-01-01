@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '../utils/database';
 import logger from '../config/logger';
+import { redisPool } from './redis-pool.service';
 
 /**
  * TaskID唯一性生成服务
@@ -22,7 +23,7 @@ export class TaskIdGeneratorService {
      */
     static async generateUniqueTaskId(): Promise<string> {
         let attempts = 0;
-        const { redisPool } = await import('./redis-pool.service');
+        // 使用静态导入的redisPool
         const redisClient = redisPool.getClient();
 
         while (attempts < this.MAX_RETRY_ATTEMPTS) {
@@ -93,14 +94,14 @@ export class TaskIdGeneratorService {
                 }
                 
             } catch (error) {
-                logger.error(`Error generating TaskID attempt ${attempts}:`, error);
+                logger.error({ error }, `Error generating TaskID attempt ${attempts}`);
                 
                 // 清理可能的残留数据
                 try {
                     await redisClient.del(lockKey);
                     await redisClient.srem(this.REDIS_TASKID_SET, candidateId);
                 } catch (cleanupError: unknown) {
-                    logger.error('Error during TaskID generation cleanup:', cleanupError);
+                    logger.error({ error: cleanupError }, 'Error during TaskID generation cleanup');
                 }
 
                 if (attempts === this.MAX_RETRY_ATTEMPTS) {
@@ -121,11 +122,11 @@ export class TaskIdGeneratorService {
      */
     static async cleanupTaskId(taskId: string): Promise<void> {
         try {
-            const { redisPool } = await import('./redis-pool.service');
+            // 使用静态导入的redisPool
             await redisPool.getClient().srem(this.REDIS_TASKID_SET, taskId);
             logger.debug(`Cleaned up TaskID from active set: ${taskId}`);
         } catch (error) {
-            logger.error(`Error cleaning up TaskID ${taskId}:`, error);
+            logger.error({ error }, `Error cleaning up TaskID ${taskId}`);
         }
     }
     
@@ -134,10 +135,10 @@ export class TaskIdGeneratorService {
      */
     static async getActiveTaskCount(): Promise<number> {
         try {
-            const { redisPool } = await import('./redis-pool.service');
+            // 使用静态导入的redisPool
             return await redisPool.getClient().scard(this.REDIS_TASKID_SET);
         } catch (error) {
-            logger.error('Error getting active task count:', error);
+            logger.error({ error }, 'Error getting active task count');
             return 0;
         }
     }
@@ -156,7 +157,7 @@ export class TaskIdGeneratorService {
      */
     static async cleanupExpiredTaskIds(): Promise<void> {
         try {
-            const { redisPool } = await import('./redis-pool.service');
+            // 使用静态导入的redisPool
             const redisClient = redisPool.getClient();
 
             // 获取所有活跃TaskID
@@ -187,7 +188,7 @@ export class TaskIdGeneratorService {
             }
             
         } catch (error) {
-            logger.error('Error during expired TaskID cleanup:', error);
+            logger.error({ error }, 'Error during expired TaskID cleanup');
         }
     }
 }

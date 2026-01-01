@@ -5,7 +5,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as archiver from 'archiver';
+import archiver from 'archiver';
 import { execSync } from 'child_process';
 import { ECS_LOCAL_PATHS } from '../config/paths';
 import logger from '../config/logger';

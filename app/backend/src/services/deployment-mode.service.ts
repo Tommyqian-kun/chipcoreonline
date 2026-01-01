@@ -1,4 +1,37 @@
 /**
+ * 部署模式配置接口
+ */
+interface EcsOnlyConfig {
+  deploymentMode: string;
+  storageService: string;
+  localStorageRoot?: string;
+  jobsDir?: string;
+  tempJobsDir?: string;
+  templatesDir?: string;
+  dockerDir?: string;
+  cleanupInterval?: string;
+  downloadTimeout?: string;
+  failedTaskCleanupDelay?: string;
+  logRetentionHours?: string;
+  downloadPort?: string;
+  maxStorageSize?: string;
+  localDockerRegistry?: string;
+  imagesCacheSize?: string;
+}
+
+interface OssConfig {
+  deploymentMode: string;
+  storageService: string;
+  ossRegion?: string;
+  ossBucket?: string;
+  // 这些属性在OSS模式下不使用，但需要存在以兼容类型
+  jobsDir?: undefined;
+  tempJobsDir?: undefined;
+}
+
+type DeploymentConfig = EcsOnlyConfig | OssConfig;
+
+/**
  * 部署模式检测和配置服务
  * 支持ECS Only和ECS+OSS+ACR两种部署模式
  */
@@ -148,15 +181,16 @@ export class DeploymentModeService {
     /**
      * 获取部署模式配置摘要
      */
-    static getConfigSummary(): object {
+    static getConfigSummary(): DeploymentConfig {
         const mode = this.getDeploymentMode();
-        
+
         if (mode === 'ecs_only') {
             return {
                 deploymentMode: mode,
                 storageService: this.getStorageService(),
                 localStorageRoot: process.env.ECS_LOCAL_STORAGE_ROOT,
                 jobsDir: process.env.ECS_JOBS_DIR,
+                tempJobsDir: process.env.TEMP_UPLOAD_DIR, // 添加临时作业目录
                 templatesDir: process.env.ECS_TEMPLATES_DIR,
                 dockerDir: process.env.ECS_DOCKER_DIR,
                 cleanupInterval: this.getCleanupInterval(),
@@ -167,14 +201,14 @@ export class DeploymentModeService {
                 maxStorageSize: this.getMaxStorageSize(),
                 localDockerRegistry: this.isLocalDockerRegistryEnabled(),
                 imagesCacheSize: this.getLocalImagesCacheSize()
-            };
+            } as DeploymentConfig;
         } else {
             return {
                 deploymentMode: mode,
                 storageService: this.getStorageService(),
                 ossRegion: process.env.OSS_REGION,
                 ossBucket: process.env.OSS_BUCKET
-            };
+            } as DeploymentConfig;
         }
     }
 }

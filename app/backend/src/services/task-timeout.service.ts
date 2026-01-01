@@ -4,6 +4,7 @@ import { DeploymentModeService } from './deployment-mode.service';
 import { spawnPython, getPythonCommand } from '../utils/pythonHelper';
 import fs from 'fs/promises';
 import path from 'path';
+import { redisPool } from './redis-pool.service';
 
 export class TaskTimeoutService {
   // 从环境变量读取超时配置
@@ -281,7 +282,7 @@ export class TaskTimeoutService {
   private static async removeTaskFromRedisQueue(taskId: string): Promise<void> {
     try {
       // 使用Redis连接池
-      const { redisPool } = await import('./redis-pool.service');
+      // 使用静态导入的redisPool
       const redisClient = redisPool.getClient();
 
       await redisClient.lrem('task_queue', 0, taskId);

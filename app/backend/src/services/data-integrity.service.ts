@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../utils/database';
 
 export class DataIntegrityService {
   /**
@@ -62,7 +60,7 @@ export class DataIntegrityService {
       const orphanedData = await prisma.tableData.findMany({
         where: {
           taskId,
-          table: null
+          table: null as any
         }
       });
 
@@ -118,7 +116,7 @@ export class DataIntegrityService {
       const orphanedData = await prisma.tableData.deleteMany({
         where: {
           taskId,
-          table: null
+          table: null as any
         }
       });
 

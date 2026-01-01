@@ -30,7 +30,7 @@ export type TaskStatus = {
 // Defines the parameters for the submitTask function
 export interface SubmitTaskParams {
     toolId: string;
-    parameters: Record<string, any>;
+    parameters: Record<string, any> | string;
     inputFile?: File | null;
     inputFiles?: File[]; // 支持多文件上传
 }

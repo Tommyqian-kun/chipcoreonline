@@ -7,7 +7,7 @@ import { env } from './env-validation';
 export const appConfig = {
   // 服务器配置
   server: {
-    port: parseInt(env.PORT || '8080'),
+    port: env.PORT,
     host: env.HOST || '0.0.0.0',
     nodeEnv: env.NODE_ENV || 'development',
   },

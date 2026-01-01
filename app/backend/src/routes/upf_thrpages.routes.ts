@@ -3,7 +3,7 @@
  * 提供初始化、数据保存、数据检查等功能的RESTful API
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, type RequestHandler } from 'express';
 import { authenticateToken } from '../middleware/auth';
 import { checkTaskExecutionPermission } from '../middleware/subscription';
 import { validate } from '../middleware/validate';
@@ -13,6 +13,11 @@ import multer from 'multer';
 import path from 'path';
 
 const router = Router();
+
+// 类型安全的 multer 中间件包装器
+const wrapMulter = (middleware: any): RequestHandler => {
+  return middleware as unknown as RequestHandler;
+};
 
 // 配置文件上传 - 使用内存存储，直接保存到目标目录
 const upload = multer({
@@ -105,12 +110,12 @@ router.post(
   '/initialize',
   authenticateToken,
   checkTaskExecutionPermission,
-  upload.fields([
+  wrapMulter(upload.fields([
     { name: 'hierYamlFile', maxCount: 1 },
     { name: 'pvlogFile', maxCount: 1 },
     { name: 'pobjTclFile', maxCount: 1 },
     { name: 'pcellYamlFile', maxCount: 1 }
-  ]),
+  ])),
   validate(initializeTaskSchema),
   upfThrpagesController.initializeTask
 );

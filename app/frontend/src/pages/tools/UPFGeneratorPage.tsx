@@ -404,7 +404,7 @@ export default function UPFGeneratorPage() {
                                             placeholder="点击或拖拽上传(.yaml)"
                                             fileType="yaml"
                                             toolType="upf"
-                                            onFileChange={(file) => form.setValue('hierYamlFile', file)}
+                                            onFileChange={(file) => form.setValue('hierYamlFile', file || undefined)}
                                             onValidationChange={handleFileValidationChange('hierYaml')}
                                             field={field}
                                         />
@@ -423,7 +423,7 @@ export default function UPFGeneratorPage() {
                                                 currentModName={currentModName}
                                                 onModuleNameParsed={setModuleNameFromVlog}
                                                 onFileChange={async (file) => {
-                                                    form.setValue('pvlogFile', file);
+                                                    form.setValue('pvlogFile', file || undefined);
                                                     if (!file) {
                                                         setModuleNameFromVlog(null);
                                                     }
@@ -454,7 +454,7 @@ export default function UPFGeneratorPage() {
                                             placeholder="点击或拖拽上传(.tcl)"
                                             fileType="tcl"
                                             toolType="upf"
-                                            onFileChange={(file) => form.setValue('pobjTclFile', file)}
+                                            onFileChange={(file) => form.setValue('pobjTclFile', file || undefined)}
                                             onValidationChange={handleFileValidationChange('pobjTcl')}
                                             field={field}
                                         />
@@ -469,7 +469,7 @@ export default function UPFGeneratorPage() {
                                             placeholder="点击或拖拽上传(.xlsx)"
                                             fileType="excel"
                                             toolType="upf"
-                                            onFileChange={(file) => form.setValue('pcontXlsxFile', file)}
+                                            onFileChange={(file) => form.setValue('pcontXlsxFile', file || undefined)}
                                             onValidationChange={handleFileValidationChange('pcontXlsx')}
                                             field={field}
                                         />
