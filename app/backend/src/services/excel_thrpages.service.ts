@@ -2298,6 +2298,31 @@ export class ExcelThrpagesService {
         console.log(`📋 [DIRTY-SAVE] 找到sheet: ${dbSheet.sheetName} (${dbSheet.id}), 包含 ${dbSheet.tables.length} 个表格`);
         console.log(`📋 [DIRTY-SAVE] 表格列表: ${dbSheet.tables.map(t => `${t.tableName}(${t.id})`).join(', ')}`);
 
+        // 🔧 关键修复：在删除之前，先查询并保存原有的dropdownData和validationData
+        const existingDropdownData = await prisma.tableData.findMany({
+          where: {
+            taskId,
+            userId,
+            sheetId: dbSheet.id
+          },
+          select: {
+            tableId: true,
+            rowNumber: true,
+            dropdownData: true,
+            validationData: true
+          }
+        });
+
+        // 创建快速查找的Map: key="tableId_rowNumber", value={dropdownData, validationData}
+        const existingDataMap = new Map(
+          existingDropdownData.map(d => [
+            `${d.tableId}_${d.rowNumber}`,
+            { dropdownData: d.dropdownData, validationData: d.validationData }
+          ])
+        );
+
+        console.log(`🔒 [DIRTY-SAVE] 保留原有dropdownData: 共${existingDataMap.size}条记录`);
+
         // 1. 清理该sheet的现有数据
         await prisma.tableData.deleteMany({
           where: {
@@ -2318,8 +2343,23 @@ export class ExcelThrpagesService {
           const dataToInsert = table.data.map((rowData, index) => {
             // 处理前端发送的嵌套数据结构
             const actualRowData = rowData.row_data || rowData;
-            const dropdownData = rowData.dropdown_data || null;
-            const validationData = rowData.validation_data || null;
+            const rowNumber = index + 1;
+            const mapKey = `${dbTable.id}_${rowNumber}`;
+
+            // 🔧 关键修复：优先使用前端发送的值，如果没有则使用原有的
+            let dropdownData = rowData.dropdown_data;
+            let validationData = rowData.validation_data;
+
+            // 如果前端没发送dropdownData，从原有数据中保留
+            if (!dropdownData && existingDataMap.has(mapKey)) {
+              dropdownData = existingDataMap.get(mapKey)!.dropdownData;
+              console.log(`🔒 [DIRTY-SAVE] 保留原有dropdownData: table=${dbTable.tableName}, row=${rowNumber}`);
+            }
+
+            // 如果前端没发送validationData，从原有数据中保留
+            if (!validationData && existingDataMap.has(mapKey)) {
+              validationData = existingDataMap.get(mapKey)!.validationData;
+            }
 
             // 确保所有字段都存在，即使为空字符串
             const completeRowData: any = {};

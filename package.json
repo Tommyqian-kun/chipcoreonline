@@ -19,7 +19,22 @@
     "db:studio": "cd app && npm run db:studio",
     "install:all": "cd app && npm run install:all",
     "setup": "npm run install:all && npm run docker:up && sleep 10 && npm run db:migrate && npm run db:seed",
-    "health": "curl http://localhost:8000/health || echo 'Backend not running'"
+    "health": "curl http://localhost:8000/health || echo 'Backend not running'",
+    "test": "npm run test:unit",
+    "test:unit": "vitest run --reporter=verbose",
+    "test:unit:watch": "vitest",
+    "test:integration": "vitest run --config=vitest.config.ts --dir=tests/integration",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:headed": "playwright test --headed",
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e",
+    "test:coverage": "vitest run --coverage",
+    "test:env:up": "cd app && docker-compose -f docker-compose.test.yml up -d",
+    "test:env:down": "cd app && docker-compose -f docker-compose.test.yml down",
+    "test:env:logs": "cd app && docker-compose -f docker-compose.test.yml logs",
+    "test:setup": "tsx tests/setup/test-env.ts",
+    "playwright:install": "playwright install chromium"
   },
   "keywords": [
     "eda",
@@ -38,7 +53,17 @@
     "exceljs": "^4.4.0",
     "playwright": "^1.55.0"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.1",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/supertest": "^6.0.3",
+    "@vitest/ui": "^4.0.16",
+    "jsdom": "^27.4.0",
+    "supertest": "^7.1.4",
+    "vitest": "^4.0.16"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/logiccore/onlineEDA.git"

@@ -23,13 +23,21 @@ build/
 # 日志文件
 *.log
 
-
 # 环境变量文件
 .env
 .env.local
+.env.test
 .env.*.local
+# 但保留example模板文件
+!.env.test.example
+!app/backend/.env.test.example
+app/backend/.env
+app/backend/.env.local
+app/backend/.env.test
+# 但保留example模板文件
+!app/backend/.env.test.example
 
- # 数据库文件
+# 数据库文件
 *.db
 *.sqlite
 *.sqlite3
@@ -38,21 +46,28 @@ prisma/migrations/
 # 临时文件
 *.tmp
 
- # 测试覆盖率
+# 测试覆盖率
 coverage/
 .nyc_output/
 
- # 忽略整个目录
+# 忽略整个目录
 backups/
 scripts/
-test/
 
- # 忽略docker大文件但保留目录结构
+# tests目录结构保留，但忽略测试结果和敏感配置
+# 测试代码和配置文件会被提交
+tests/e2e/screenshots/
+tests/e2e/test-results/
+tests/e2e/playwright-report/
+tests/e2e/.cache/
+tests/performance/logs/
+
+# 忽略docker大文件但保留目录结构
 docker/images/sdc/logiccore_sdc*
 docker/images/upf/logiccore_upf*
 
- # OSS下载缓存
+# OSS下载缓存
 /opt/logiccore/temp/
 
- # Docker相关
+# Docker相关
 docker-compose.override.yml

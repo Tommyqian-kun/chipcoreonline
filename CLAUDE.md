@@ -450,10 +450,10 @@ docker exec -it app_redis_1 redis-cli MONITOR
 位于`scripts/`目录，用来保存辅助项目开发的中间脚本，不能存放项目本身业务功能代码
 
 ### 测试脚本
-位于 `test/` 目录，用来保存业务功能的测试工具：
-- `test/task_submission.py` - 任务提交测试
-- `test/monitor_task_execution.py` - 任务执行监控
-- `test/debug_container_execution.py` - 容器执行调试
+位于 `tests/` 目录，用来保存业务功能的测试工，所有测试相关的代码文档数据和目录结构都放到这个目录下面，
+- `tests/task_submission.py` - 任务提交测试
+- `tests/monitor_task_execution.py` - 任务执行监控
+- `tests/debug_container_execution.py` - 容器执行调试
 
 ## 重要提醒
 

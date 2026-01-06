@@ -170,7 +170,9 @@ await prisma.tableData.upsert({
   create: { tableId, rowIndex, cellIndex, cellValue, taskId, userId }
 });
 ```
-
+**检查数据API**:
+```
+```
 ##### 阶段四：任务提交与队列处理 (a11-a13)
 
 **提交API**: `POST /api/v1/sdc/thrpages/{taskId}/submit`
