@@ -8,6 +8,7 @@
 
 | 版本号 | 提交信息 | 提交日期 |
 |--------|----------|----------|
+| 058d5b5 | feat: 引入完整测试框架并修复关键bug (版本10) | 2026-01-06 |
 | 6320358 | fix: 修复 docs/critical_issues_fix.md 中的关键问题 | 2026-01-01 |
 | 47f862f | fix: 修复浏览器 require is not defined 错误和 TypeScript 类型问题 | 2026-01-01 |
 | eaf589f | fix: 修复前后端各30多处的TypeScript 类型错误和新增docs/dev_improve_*.md文档 | 2026-01-01 |
@@ -21,6 +22,307 @@
 ---
 
 ## 版本详情
+
+### 版本 10: 058d5b5
+
+**提交信息**: feat: 引入完整测试框架并修复关键bug (版本10)
+
+**提交日期**: 2026-01-06
+
+**作者**: Claude Code <noreply@anthropic.com>
+
+#### 版本概述
+
+本次版本是项目的一个**重大里程碑**，引入了完整的测试基础设施框架，包括单元测试、集成测试和端到端测试。同时修复了Excel多页面保存时的关键bug，确保数据的完整性和一致性。
+
+#### 核心新增功能
+
+##### 1. 测试框架基础设施
+
+**配置文件**:
+- `vitest.config.ts` - Vitest单元测试框架配置
+- `playwright.config.ts` - Playwright E2E测试框架配置
+- `app/docker-compose.test.yml` - 独立的测试环境Docker配置（PostgreSQL测试库、Redis测试实例）
+- `app/backend/.env.test.example` - 测试环境变量模板
+
+**测试目录结构**:
+```
+tests/
+├── unit/                    # 单元测试 (13个文件)
+│   ├── backend/
+│   │   ├── services/        # 后端服务单元测试
+│   │   │   ├── auth.service.test.ts
+│   │   │   ├── task.service.test.ts
+│   │   │   ├── excel-thrpages.service.test.ts
+│   │   │   ├── subscription.service.test.ts
+│   │   │   ├── payment.service.test.ts
+│   │   │   └── order.service.test.ts
+│   │   └── redis/           # Redis服务测试
+│   │       ├── redis-lock.test.ts
+│   │       └── redis-queue.service.test.ts
+│   ├── frontend/
+│   │   ├── components/      # 前端组件测试
+│   │   │   ├── EcsOnlyStatusIndicator.test.tsx
+│   │   │   └── ProtectedRoute.test.tsx
+│   │   ├── hooks/           # React Hooks测试
+│   │   │   └── use-mobile.test.ts
+│   │   └── form-validation.test.ts
+│   └── test-data-factory.test.ts
+│
+├── integration/             # API集成测试 (9个文件)
+│   ├── auth/
+│   │   └── auth.test.ts     # 认证API测试
+│   ├── sdc-thrpages/
+│   │   └── sdc-api.test.ts  # SDC工具API测试
+│   ├── upf-thrpages/
+│   │   └── upf-api.test.ts  # UPF工具API测试
+│   ├── tasks/
+│   │   └── tasks.test.ts    # 任务管理API测试
+│   ├── worker/
+│   │   ├── worker-integration.test.ts     # Worker集成测试
+│   │   └── task-state-sync.test.ts       # 任务状态同步测试
+│   ├── container/
+│   │   └── container-execution.test.ts   # Docker容器执行测试
+│   └── common/
+│       └── error-scenarios.test.ts       # 错误场景测试
+│
+├── e2e/                     # 端到端测试 (5个文件)
+│   ├── helpers/             # 测试辅助函数
+│   │   ├── api.ts           # API请求辅助
+│   │   ├── browser.ts       # 浏览器操作辅助
+│   │   └── data.ts          # 数据处理辅助
+│   ├── auth.spec.ts         # 认证流程E2E测试
+│   ├── sdc-tool.spec.ts     # SDC工具E2E测试
+│   └── upf-tool.spec.ts     # UPF工具E2E测试
+│
+├── performance/             # 性能测试
+│   └── concurrent-tasks/
+│       ├── concurrent-execution.test.ts   # 并发执行测试
+│       ├── monitor_task_execution.py      # 任务执行监控脚本
+│       └── debug_container_execution.py   # 容器执行调试脚本
+│
+├── setup/                   # 测试环境设置
+│   └── test-env.ts          # 测试环境初始化
+│
+├── docs/                    # 测试文档
+│   ├── UNIT_TEST_GUIDE.md
+│   ├── API_INTEGRATION_TEST_GUIDE.md
+│   ├── WORKER_REDIS_TEST_GUIDE.md
+│   └── CONTAINER_CONCURRENCY_TEST_GUIDE.md
+│
+└── README.md                # 测试使用指南
+```
+
+##### 2. 测试脚本和依赖
+
+**package.json 新增测试脚本**:
+```bash
+npm run test                 # 运行单元测试
+npm run test:unit            # 单元测试（watch模式）
+npm run test:unit:watch      # 单元测试监听模式
+npm run test:integration     # 集成测试
+npm run test:e2e             # E2E测试
+npm run test:e2e:ui          # E2E测试（UI模式）
+npm run test:e2e:debug       # E2E测试（调试模式）
+npm run test:e2e:headed      # E2E测试（有头模式）
+npm run test:all             # 运行所有测试
+npm run test:coverage        # 测试覆盖率报告
+npm run test:env:up          # 启动测试环境
+npm run test:env:down        # 停止测试环境
+npm run test:env:logs        # 查看测试环境日志
+npm run test:setup           # 设置测试环境
+npm run playwright:install   # 安装Playwright浏览器
+```
+
+**新增测试依赖**:
+- `vitest ^4.0.16` - 单元测试框架
+- `@vitest/ui ^4.0.16` - Vitest UI界面
+- `@playwright/test ^1.57.0` - E2E测试框架
+- `@testing-library/react ^16.3.1` - React组件测试
+- `@testing-library/jest-dom ^6.9.1` - Jest DOM断言
+- `@testing-library/user-event ^14.6.1` - 用户交互模拟
+- `supertest ^7.1.4` - HTTP测试工具
+- `jsdom ^27.4.0` - DOM模拟环境
+
+#### 关键Bug修复
+
+##### Excel多页面数据保存问题
+
+**文件**: `app/backend/src/services/excel_thrpages.service.ts:2301-2358`
+
+**问题描述**:
+在保存多页面Excel表单时，原有的`dropdownData`（下拉数据）和`validationData`（验证规则）被清空，导致用户已保存的下拉选项和数据验证规则丢失。
+
+**根本原因**:
+- 保存sheet时，直接删除所有现有数据（包括dropdownData和validationData）
+- 只插入前端发送的新数据
+- 如果前端未发送这些字段，则导致原有数据丢失
+
+**解决方案**:
+1. **删除前先保存**:
+   ```typescript
+   // 在删除前，先查询并保存原有的dropdownData和validationData
+   const existingDropdownData = await prisma.tableData.findMany({
+     where: { taskId, userId, sheetId: dbSheet.id },
+     select: { tableId: true, rowNumber: true, dropdownData: true, validationData: true }
+   });
+   ```
+
+2. **创建快速查找Map**:
+   ```typescript
+   const existingDataMap = new Map(
+     existingDropdownData.map(d => [
+       `${d.tableId}_${d.rowNumber}`,
+       { dropdownData: d.dropdownData, validationData: d.validationData }
+     ])
+   );
+   ```
+
+3. **优先使用前端值，无则保留原值**:
+   ```typescript
+   let dropdownData = rowData.dropdown_data;
+   let validationData = rowData.validation_data;
+
+   // 如果前端没发送，从原有数据中保留
+   if (!dropdownData && existingDataMap.has(mapKey)) {
+     dropdownData = existingDataMap.get(mapKey)!.dropdownData;
+   }
+
+   if (!validationData && existingDataMap.has(mapKey)) {
+     validationData = existingDataMap.get(mapKey)!.validationData;
+   }
+   ```
+
+**影响范围**: 确保多页面表单的数据完整性和用户体验
+
+#### 文档更新
+
+##### 修改文档
+| 文件 | 变更类型 | 说明 |
+|------|----------|------|
+| `docs/ecsonly_multipage_dev_opus45_0.md` | 大幅更新 | 项目概述文档内容扩展 |
+| `docs/ecsonly_multipage_dev_opus45_2.md` | 小幅修正 | 部署指南修正 |
+| `CLAUDE.md` | 更新 | 测试目录说明更新 (test/ → tests/) |
+
+##### 新增文档
+| 文件 | 说明 |
+|------|------|
+| `docs/ecsonly_task_db_operation.md` | 任务数据库操作分析报告 |
+| `tests/README.md` | 测试使用指南 |
+| `tests/CONFIG_SUMMARY.md` | 测试配置总结 |
+| `tests/FIX_SUMMARY.md` | 测试修复总结 |
+| `tests/TEST_CODE_REVIEW.md` | 测试代码审查 |
+| `tests/TEST_INFRASTRUCTURE_SUMMARY.md` | 测试基础设施总结 |
+| `tests/test-coverage-report.md` | 测试覆盖率报告 |
+| `tests/docs/UNIT_TEST_GUIDE.md` | 单元测试指南 |
+| `tests/docs/API_INTEGRATION_TEST_GUIDE.md` | API集成测试指南 |
+| `tests/docs/WORKER_REDIS_TEST_GUIDE.md` | Worker和Redis测试指南 |
+| `tests/docs/CONTAINER_CONCURRENCY_TEST_GUIDE.md` | 容器并发测试指南 |
+
+#### 配置优化
+
+##### .gitignore 优化
+- 精细化测试相关忽略规则
+- 保留 `.env.test.example` 模板文件（不忽略）
+- 忽略测试结果临时文件：
+  - `tests/e2e/screenshots/`
+  - `tests/e2e/test-results/`
+  - `tests/e2e/playwright-report/`
+  - `tests/e2e/.cache/`
+  - `tests/performance/logs/`
+
+##### CLAUDE.md 更新
+- 更新测试目录路径说明: `test/` → `tests/`
+- 明确测试目录结构和用途
+
+#### 测试环境配置
+
+##### 独立测试数据库和Redis
+- PostgreSQL测试库: 端口5433，数据库名`logiccore_test`
+- Redis测试实例: 端口6380
+- 避免与开发环境冲突
+
+##### Playwright配置
+- 支持多种浏览器: Chrome, Edge, Firefox
+- 配置超时时间: 5分钟（SDC/UPF工具执行需要较长时间）
+- 自动截图和录屏（失败时）
+- 测试报告: HTML + JUnit
+
+##### Vitest配置
+- 测试环境: jsdom
+- 覆盖率阈值: 60% (lines/functions/statements), 50% (branches)
+- 支持路径别名: `@`, `@tests`, `@backend`
+
+#### 变更统计
+
+- **总文件变更**: 58个文件
+- **新增行数**: 23,767行
+- **删除行数**: 260行
+- **新增文件**: 48个
+- **修改文件**: 8个
+- **删除文件**: 1个
+
+**详细统计**:
+- 测试代码文件: 48个
+- 配置文件: 4个
+- 文档文件: 6个
+- 业务代码修复: 1个
+
+#### 测试框架覆盖范围
+
+##### 单元测试 (Vitest)
+- 前端组件测试: 2个
+- 前端Hooks测试: 1个
+- 后端服务测试: 7个
+- Redis服务测试: 2个
+- 工厂函数测试: 1个
+
+##### 集成测试 (Vitest + Supertest)
+- 认证API测试: 1个
+- 任务API测试: 1个
+- SDC工具API测试: 1个
+- UPF工具API测试: 1个
+- Worker集成测试: 2个
+- 容器执行测试: 1个
+- 错误场景测试: 1个
+
+##### E2E测试 (Playwright)
+- 认证流程测试: 1个
+- SDC工具完整流程测试: 1个
+- UPF工具完整流程测试: 1个
+
+##### 性能测试
+- 并发任务执行测试: 1个
+- 任务执行监控脚本: 2个
+
+#### 后续建议
+
+1. **测试验证**: 运行测试套件验证测试框架可用性
+   ```bash
+   npm run test:unit              # 单元测试
+   npm run test:env:up            # 启动测试环境
+   npm run test:integration       # 集成测试
+   npm run test:e2e               # E2E测试
+   ```
+
+2. **CI/CD集成**: 将测试集成到CI/CD流程
+   - PR前自动运行单元测试和集成测试
+   - 合并到主分支前运行完整测试套件
+   - 定期运行E2E测试
+
+3. **测试覆盖率提升**: 逐步提升测试覆盖率至70%+
+
+4. **测试文档完善**: 根据实际测试情况更新测试指南文档
+
+#### 技术亮点
+
+1. **完整的测试金字塔**: 单元测试 → 集成测试 → E2E测试
+2. **独立测试环境**: 避免测试污染开发环境
+3. **多浏览器支持**: Chrome, Edge, Firefox
+4. **性能测试框架**: 支持并发任务和压力测试
+5. **辅助工具完善**: 测试数据工厂、API辅助、浏览器辅助
+
+---
 
 ### 版本 9: 6320358
 
@@ -857,6 +1159,8 @@ LogicCore 项目初始化版本，包含完整的 SDC 和 UPF 生成工具，支
 | v6 (d549bc3) | 连接池启动时序修复，类型错误修复 |
 | v7 (eaf589f) | TypeScript 类型错误全面修复（60+ 处），准备合并到 master |
 | v8 (47f862f) | 修复浏览器 require 错误和 TypeScript 类型问题 |
+| v9 (6320358) | 系统性修复关键问题：Redis连接池、文件上传安全、WebSocket限制、支付验证、API超时、并发槽位TTL |
+| v10 (058d5b5) | 引入完整测试框架（单元测试、集成测试、E2E测试），修复Excel多页面数据保存bug |
 ---
 
 ## 技术演进亮点
@@ -868,4 +1172,4 @@ LogicCore 项目初始化版本，包含完整的 SDC 和 UPF 生成工具，支
 
 ---
 
-*文档更新时间: 2026-01-01*
+*文档更新时间: 2026-01-06*
