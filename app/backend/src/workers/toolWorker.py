@@ -117,6 +117,11 @@ def get_deployment_mode():
 def update_task_status_via_api(task_id, status, additional_data=None):
     """通过内部API更新任务状态，确保WebSocket通知和前端状态同步"""
     try:
+        # 强制要求环境变量，不使用默认值
+        internal_api_key = os.environ.get('INTERNAL_API_KEY')
+        if not internal_api_key:
+            raise ValueError("INTERNAL_API_KEY environment variable is required for secure operation")
+
         api_base = os.environ.get('API_BASE_URL', 'http://localhost:8080')
         url = f"{api_base}/api/v1/tasks/internal/{task_id}/status"
 
@@ -128,10 +133,10 @@ def update_task_status_via_api(task_id, status, additional_data=None):
         if additional_data:
             payload.update(additional_data)
 
-        # 使用内部API密钥进行认证（如果配置了的话）
+        # 使用强制的内部API密钥进行认证
         headers = {
             'Content-Type': 'application/json',
-            'X-Internal-API-Key': os.environ.get('INTERNAL_API_KEY', 'worker-internal-key')
+            'X-Internal-API-Key': internal_api_key
         }
 
         response = requests.put(url, json=payload, headers=headers, timeout=10)
@@ -141,6 +146,10 @@ def update_task_status_via_api(task_id, status, additional_data=None):
         else:
             logging.error(f"Failed to update task {task_id} status via API: {response.status_code} {response.text}")
 
+    except ValueError as ve:
+        # 专门处理环境变量缺失错误
+        logging.error(f"Configuration error: {str(ve)}")
+        raise
     except Exception as e:
         logging.error(f"Error updating task {task_id} status via API: {str(e)}")
         # 如果API调用失败，至少记录到日志中
@@ -3014,6 +3023,10 @@ def load_image_from_tar(image_name, task_logger):
 if __name__ == '__main__':
     logging.info("Starting Python Task Worker...")
 
+    # 孤儿容器清理计数器（每10次空闲循环执行一次，约5分钟）
+    orphan_cleanup_counter = 0
+    ORPHAN_CLEANUP_INTERVAL = 10
+
     # 简单的Worker循环，直接监听Redis队列
     while True:
         try:
@@ -3042,6 +3055,17 @@ if __name__ == '__main__':
                 except Exception as e:
                     logging.error(f"Error processing task {task_id}: {e}", exc_info=True)
             else:
+                # 没有任务时，检查是否需要执行孤儿容器清理
+                orphan_cleanup_counter += 1
+                if orphan_cleanup_counter >= ORPHAN_CLEANUP_INTERVAL:
+                    try:
+                        logging.info("Running periodic orphan container cleanup...")
+                        cleaned_count = container_manager.cleanup_orphaned_containers()
+                        logging.info(f"Orphan container cleanup completed: {cleaned_count} containers cleaned")
+                        orphan_cleanup_counter = 0
+                    except Exception as cleanup_error:
+                        logging.error(f"Error during orphan container cleanup: {cleanup_error}")
+
                 logging.info("No tasks in queue, continuing to wait...")
 
         except KeyboardInterrupt:

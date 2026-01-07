@@ -10,6 +10,7 @@
 import docker
 import logging
 import os
+import time
 from datetime import datetime
 from typing import Dict, Optional, Any
 
@@ -17,7 +18,11 @@ logger = logging.getLogger(__name__)
 
 class ContainerManager:
     """容器管理器 - 跟踪和清理容器"""
-    
+
+    # 重试配置
+    MAX_CLEANUP_RETRIES = 3
+    RETRY_DELAY_SECONDS = 2
+
     def __init__(self):
         try:
             self.docker_client = docker.from_env()
@@ -62,57 +67,72 @@ class ContainerManager:
             raise
     
     def cleanup_container(self, task_id: str, force: bool = False, reason: str = "unknown") -> bool:
-        """清理指定任务的容器"""
-        try:
-            container_info = self.active_containers.get(task_id)
-            success = False
-            
-            if container_info:
-                container = container_info['container']
-                container_name = container_info['name']
-                
-                try:
-                    # 停止容器
-                    container.stop(timeout=10)
-                    logger.info(f"Container stopped: {container_name}")
-                except Exception as e:
-                    logger.warning(f"Failed to stop container {container_name}: {e}")
-                
-                try:
-                    # 删除容器
-                    container.remove(force=force)
-                    logger.info(f"Container removed: {container_name}")
-                    success = True
-                except Exception as e:
-                    logger.warning(f"Failed to remove container {container_name}: {e}")
-                
-                # 从跟踪列表移除
-                del self.active_containers[task_id]
-            
-            # 尝试通过名称清理（备用方案）
-            container_name = f"tool-job-{task_id}"
+        """清理指定任务的容器（带重试机制）"""
+        for attempt in range(self.MAX_CLEANUP_RETRIES):
             try:
-                container = self.docker_client.containers.get(container_name)
-                container.stop(timeout=10)
-                container.remove(force=force)
-                logger.info(f"Container cleaned up by name: {container_name}")
-                success = True
-            except docker.errors.NotFound:
-                logger.debug(f"Container {container_name} not found, already cleaned")
-                success = True  # 容器不存在也算成功
+                container_info = self.active_containers.get(task_id)
+                success = False
+
+                if container_info:
+                    container = container_info['container']
+                    container_name = container_info['name']
+
+                    try:
+                        # 停止容器
+                        container.stop(timeout=10)
+                        logger.info(f"Container stopped: {container_name}")
+                    except Exception as e:
+                        logger.warning(f"Failed to stop container {container_name}: {e}")
+
+                    try:
+                        # 删除容器
+                        container.remove(force=force)
+                        logger.info(f"Container removed: {container_name}")
+                        success = True
+                    except Exception as e:
+                        logger.warning(f"Failed to remove container {container_name}: {e}")
+
+                    # 从跟踪列表移除
+                    if task_id in self.active_containers:
+                        del self.active_containers[task_id]
+
+                # 尝试通过名称清理（备用方案）
+                container_name = f"tool-job-{task_id}"
+                try:
+                    container = self.docker_client.containers.get(container_name)
+                    container.stop(timeout=10)
+                    container.remove(force=force)
+                    logger.info(f"Container cleaned up by name: {container_name}")
+                    success = True
+                except docker.errors.NotFound:
+                    logger.debug(f"Container {container_name} not found, already cleaned")
+                    success = True  # 容器不存在也算成功
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup container {container_name}: {e}")
+
+                if success:
+                    logger.info(f"Container cleanup successful for task {task_id}, reason: {reason}, attempt: {attempt + 1}")
+                    return True
+                else:
+                    # 如果失败且还有重试次数，等待后重试
+                    if attempt < self.MAX_CLEANUP_RETRIES - 1:
+                        logger.warning(f"Container cleanup failed for task {task_id}, retrying in {self.RETRY_DELAY_SECONDS}s... (attempt {attempt + 1}/{self.MAX_CLEANUP_RETRIES})")
+                        time.sleep(self.RETRY_DELAY_SECONDS)
+                        continue
+                    else:
+                        logger.error(f"Container cleanup failed for task {task_id} after {self.MAX_CLEANUP_RETRIES} attempts, reason: {reason}")
+                        return False
+
             except Exception as e:
-                logger.warning(f"Failed to cleanup container {container_name}: {e}")
-            
-            if success:
-                logger.info(f"Container cleanup successful for task {task_id}, reason: {reason}")
-            else:
-                logger.error(f"Container cleanup failed for task {task_id}, reason: {reason}")
-                
-            return success
-                
-        except Exception as e:
-            logger.error(f"Error cleaning up container for task {task_id}: {e}")
-            return False
+                logger.error(f"Error cleaning up container for task {task_id} (attempt {attempt + 1}): {e}")
+                # 如果是最后一次尝试，直接返回失败
+                if attempt == self.MAX_CLEANUP_RETRIES - 1:
+                    return False
+                # 否则等待后重试
+                logger.warning(f"Retrying container cleanup for task {task_id} in {self.RETRY_DELAY_SECONDS}s...")
+                time.sleep(self.RETRY_DELAY_SECONDS)
+
+        return False
     
     def cleanup_all_task_containers(self, reason: str = "system_shutdown") -> int:
         """清理所有任务容器（系统关闭时调用）"""

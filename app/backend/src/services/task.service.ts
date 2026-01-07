@@ -13,6 +13,7 @@ import { createTaskLogger, TaskLogger } from './task-logger.service';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { redisPool } from './redis-pool.service';
+import { sanitizeFileName, generateSafeFilePath } from '../utils/file-security';
 
 export const createTask = async (body: any, userId: string, inputFiles?: Express.Multer.File[]): Promise<Task> => {
     // 标记：订阅中间件已经预留了并发槽位
@@ -178,9 +179,18 @@ export const createTask = async (body: any, userId: string, inputFiles?: Express
         await taskLogger.logStepStart('TEMP_FILE_UPLOAD', 'Saving uploaded files to temp directory');
 
         for (const file of inputFiles) {
-            const filePath = path.join(tempDir, file.originalname);
-            await fs.writeFile(filePath, file.buffer);
-            inputFilePaths.push(file.originalname);
+            // 验证并清理文件名，防止路径遍历攻击
+            const safeFilePath = generateSafeFilePath(tempDir, file.originalname);
+            const { safeName } = sanitizeFileName(file.originalname);
+
+            await fs.writeFile(safeFilePath, file.buffer);
+            inputFilePaths.push(safeName);
+
+            logger.debug({
+                originalName: file.originalname,
+                safeName,
+                safeFilePath
+            }, 'File sanitized and saved');
         }
 
         await taskLogger.logStepSuccess('TEMP_FILE_UPLOAD', 'Files saved to temp directory', {

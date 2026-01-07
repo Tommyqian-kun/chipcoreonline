@@ -13,7 +13,7 @@ import path from 'path';
 import fs from 'fs';
 import { promises as fsPromises } from 'fs';
 import { v4 as uuidv4 } from 'uuid';
-import redisClient from '../config/redis';
+import { redisPool } from '../services/redis-pool.service';
 import { DeploymentModeService } from '../services/deployment-mode.service';
 import { initializeTaskLogger, logToTaskFile, logErrorToTaskFile, cleanupTaskLogger } from '../utils/task-logger';
 import { createOperationLogger } from '../utils/operation-logger';
@@ -45,7 +45,8 @@ export const initializeTask = async (req: Request, res: Response) => {
     }
 
     // 检查Redis队列上限
-    const queueLength = await redisClient.llen('task_queue');
+    const redis = redisPool.getClient();
+    const queueLength = await redis.llen('task_queue');
     const maxQueueSize = parseInt(process.env.MAX_QUEUE_SIZE || '48');
 
     if (queueLength >= maxQueueSize) {
@@ -92,12 +93,12 @@ export const initializeTask = async (req: Request, res: Response) => {
       const logsDir = path.join(taskLogsDir, taskId);
       console.log('📁 [UPF-THRPAGES] 任务目录:', { taskDir, logsDir });
 
-      // 创建temp和logs目录 - 设置权限为777以确保容器内用户可写入
+      // 创建temp和logs目录 - 设置权限为750（所有者读写执行，组读执行，其他无权限）
       await fsPromises.mkdir(taskDir, { recursive: true });
-      await fsPromises.mkdir(logsDir, { recursive: true, mode: 0o777 });
+      await fsPromises.mkdir(logsDir, { recursive: true, mode: 0o750 });
       // 如果日志目录已存在，也需要设置权限
       try {
-        await fsPromises.chmod(logsDir, 0o777);
+        await fsPromises.chmod(logsDir, 0o750);
       } catch (error) {
         console.error('⚠️ 无法设置日志目录权限:', error);
       }
@@ -703,10 +704,11 @@ export const submitTask = async (req: Request, res: Response) => {
       operationLogger.stepStart('QUEUE', '将任务加入Redis队列');
       operationLogger.info(`队列名称: task_queue`);
       console.log(`🔄 [UPF-THRPAGES] 将任务加入Redis队列:`, { taskId, queueName: 'task_queue' });
-      await redisClient.rpush('task_queue', taskId);
+      const redis = redisPool.getClient();
+      await redis.rpush('task_queue', taskId);
 
       // 验证任务是否成功入队
-      const queueLength = await redisClient.llen('task_queue');
+      const queueLength = await redis.llen('task_queue');
       operationLogger.stepComplete('QUEUE', `任务入队成功，当前队列长度: ${queueLength}`);
       console.log(`✅ [UPF-THRPAGES] 任务入队成功:`, { taskId, currentQueueLength: queueLength });
 
@@ -731,7 +733,7 @@ export const submitTask = async (req: Request, res: Response) => {
     operationLogger.complete(true, '任务提交完成，已加入执行队列');
 
     // 获取当前队列长度用于响应
-    const currentQueueLength = await redisClient.llen('task_queue');
+    const currentQueueLength = await redisPool.getClient().llen('task_queue');
 
     res.json({
       success: true,

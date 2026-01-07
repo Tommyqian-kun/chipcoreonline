@@ -37,7 +37,7 @@ export class UserConcurrentRefreshService {
       intervalMs
     }, 'User concurrent TTL refresh service started');
 
-    // 启动时立即执行一次刷新
+    // 启动时立即执行一次刷新和同步
     setTimeout(() => this.performRefresh(), 5000); // 5秒后执行第一次
   }
 
@@ -64,7 +64,20 @@ export class UserConcurrentRefreshService {
     this.isRunning = true;
 
     try {
-      // 查找所有正在运行或等待中的任务
+      // 1. 先从数据库同步槽位状态，确保一致性
+      try {
+        const syncResult = await userConcurrentCheck.syncFromDatabase();
+        logger.info({
+          syncedUsers: syncResult.syncedUsers,
+          totalSlotsSynced: syncResult.totalSlotsSynced
+        }, 'Database sync completed');
+      } catch (syncError) {
+        logger.error({
+          error: syncError instanceof Error ? syncError.message : 'Unknown error'
+        }, 'Database sync failed, continuing with TTL refresh');
+      }
+
+      // 2. 查找所有正在运行或等待中的任务
       const activeTasks = await prisma.task.findMany({
         where: {
           status: { in: [TaskStatus.DRAFT, TaskStatus.PENDING, TaskStatus.RUNNING] }
@@ -87,7 +100,7 @@ export class UserConcurrentRefreshService {
       let successCount = 0;
       let errorCount = 0;
 
-      // 为每个有活跃任务的用户刷新槽位TTL
+      // 3. 为每个有活跃任务的用户刷新槽位TTL
       for (const task of activeTasks) {
         try {
           await userConcurrentCheck.refreshSlotTTL(task.userId);

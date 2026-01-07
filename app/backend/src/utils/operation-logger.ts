@@ -29,13 +29,13 @@ export class OperationLogger {
     const projectRoot = path.join(process.cwd(), '..', '..');
     const logsDir = path.join(projectRoot, 'logs', taskId);
 
-    // 确保日志目录存在 - 设置权限为777以确保容器内用户可写入
+    // 确保日志目录存在 - 设置权限为750（所有者读写执行，组读执行，其他无权限）
     if (!fs.existsSync(logsDir)) {
-      fs.mkdirSync(logsDir, { recursive: true, mode: 0o777 });
+      fs.mkdirSync(logsDir, { recursive: true, mode: 0o750 });
     }
     // 如果目录已存在，也需要设置权限
     try {
-      fs.chmodSync(logsDir, 0o777);
+      fs.chmodSync(logsDir, 0o750);
     } catch (error) {
       console.error(`⚠️ 无法设置日志目录权限 ${logsDir}:`, error);
     }

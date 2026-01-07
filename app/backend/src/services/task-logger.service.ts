@@ -50,14 +50,14 @@ export class TaskLogger {
      */
     async initialize(): Promise<void> {
         try {
-            // 确保logs目录存在 - 设置权限为777以确保容器内用户可写入
-            await fs.mkdir(this.logsDir, { recursive: true, mode: 0o777 });
+            // 确保logs目录存在 - 设置权限为750（所有者读写执行，组读执行，其他无权限）
+            await fs.mkdir(this.logsDir, { recursive: true, mode: 0o750 });
 
-            // 确保任务日志目录存在 - 设置权限为777以确保容器内用户可写入
-            await fs.mkdir(this.taskLogDir, { recursive: true, mode: 0o777 });
+            // 确保任务日志目录存在 - 设置权限为750（所有者读写执行，组读执行，其他无权限）
+            await fs.mkdir(this.taskLogDir, { recursive: true, mode: 0o750 });
             // 如果目录已存在，也需要设置权限
             try {
-                await fs.chmod(this.taskLogDir, 0o777);
+                await fs.chmod(this.taskLogDir, 0o750);
             } catch (error) {
                 console.error('⚠️ 无法设置日志目录权限:', error);
             }

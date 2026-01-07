@@ -34,7 +34,7 @@ export class UserConcurrentCheckService {
 
     // 计算总TTL（转换为秒）
     const queueWaitSeconds = queueWaitTimeoutMinutes * 60;
-    const executionTimeoutSeconds = executionTimeoutMinutes * 60 * 60;
+    const executionTimeoutSeconds = executionTimeoutMinutes * 60;
 
     const totalTTL = queueWaitSeconds + containerStartupTimeoutSeconds + executionTimeoutSeconds + bufferSeconds;
 

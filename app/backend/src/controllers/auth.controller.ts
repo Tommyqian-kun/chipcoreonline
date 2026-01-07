@@ -60,7 +60,10 @@ export const loginController = async (req: Request, res: Response) => {
     const result = await loginUser(email, password);
 
     if (!result) {
-      return res.status(401).json({ message: '无效的邮箱或密码' });
+      return res.status(401).json({
+        message: '无效的邮箱或密码',
+        code: 'INVALID_CREDENTIALS'
+      });
     }
 
     const { token, user } = result;
@@ -79,13 +82,20 @@ export const loginController = async (req: Request, res: Response) => {
 
   } catch (error: any) {
     if (error.message === 'EmailNotVerified') {
-      return res.status(403).json({ 
+      return res.status(403).json({
         message: '您的邮箱尚未验证，请检查您的收件箱。',
         code: 'EMAIL_NOT_VERIFIED'
       });
     }
     if (error.message === 'ServerConfigurationError') {
       return res.status(500).json({ message: '服务器配置错误' });
+    }
+    if (error.message === 'AccountLocked') {
+      return res.status(429).json({
+        message: `登录尝试次数过多，请在${error.lockMinutes}分钟后重试`,
+        code: 'ACCOUNT_LOCKED',
+        retryAfter: error.lockTimeRemaining
+      });
     }
     console.error('Login error:', error);
     res.status(500).json({ message: '登录时发生内部错误' });
