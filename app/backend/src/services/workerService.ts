@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import logger from '../config/logger';
-import redisClient from '../config/redis';
+import { redisPool } from '../services/redis-pool.service';
 
 // 获取当前文件的目录路径 (ES模块方式)
 const __filename = fileURLToPath(import.meta.url);
@@ -330,7 +330,8 @@ class WorkerService {
    */
   private async checkRedisHealth(): Promise<boolean> {
     try {
-      await redisClient.ping();
+      const redis = redisPool.getClient();
+      await redis.ping();
       return true;
     } catch (error) {
       return false;

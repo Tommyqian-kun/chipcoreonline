@@ -6,10 +6,16 @@ import { prisma } from '../utils/database';
 import { z } from 'zod';
 import { CurrencyCalculator } from '../utils/decimal';
 import logger from '../config/logger';
-import { Redis } from 'ioredis';
+import alipaySdk from '../config/alipay';
+import { redisPool } from './redis-pool.service';
 
-// 初始化Redis连接用于分布式锁（增强版）
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+/**
+ * 获取Redis客户端（使用连接池）
+ * 统一使用redisPool，避免创建独立连接
+ */
+function getRedisClient() {
+  return redisPool.getClient();
+}
 
 // Define BillingCycle enum locally since it's not in the schema
 enum BillingCycle {
@@ -27,6 +33,7 @@ async function acquireEnhancedLock(key: string, ttl: number = 300): Promise<{
   release?: () => Promise<void>;
 }> {
   const lockId = require('uuid').v4();
+  const redis = getRedisClient();
 
   try {
     const result = await redis.set(key, lockId, 'EX', ttl, 'NX');
@@ -218,7 +225,7 @@ export const getOrderStatus = async (userId: string, orderId: string) => {
 };
 
 /**
- * 处理支付宝支付回调通知（带幂等性保证）
+ * 处理支付宝支付回调通知（带签名验证和幂等性保证）
  * @param params 支付宝回调参数
  */
 export const processAlipayNotification = async (params: any) => {
@@ -226,7 +233,30 @@ export const processAlipayNotification = async (params: any) => {
   const tradeStatus = params.trade_status;
   const gatewayTransactionId = params.trade_no;
 
-  // 检查是否为成功支付通知
+  // 1. 验证签名（防止伪造通知）
+  if (!alipaySdk) {
+    logger.error('Alipay SDK not initialized');
+    throw new Error('Alipay SDK not initialized');
+  }
+
+  const signVerified = alipaySdk.checkNotifySign(params);
+  if (!signVerified) {
+    logger.error({
+      orderId,
+      params: JSON.stringify(params),
+      ip: params.ip,
+      userAgent: params.user_agent
+    }, 'Alipay signature verification failed - POSSIBLE ATTACK');
+
+    throw new Error('Invalid signature');
+  }
+
+  logger.info({
+    orderId,
+    gatewayTransactionId
+  }, 'Alipay notification signature verified');
+
+  // 2. 检查是否为成功支付通知
   if (tradeStatus !== 'TRADE_SUCCESS' && tradeStatus !== 'TRADE_FINISHED') {
     logger.info({
       orderId,
@@ -236,9 +266,9 @@ export const processAlipayNotification = async (params: any) => {
     return;
   }
 
-  // 使用增强的分布式锁确保幂等性（非侵入式增强）
+  // 3. 使用增强的分布式锁确保幂等性
   const lockKey = `payment_callback_${orderId}_${gatewayTransactionId}`;
-  const lockResult = await acquireEnhancedLock(lockKey, 300); // 5分钟锁定时间
+  const lockResult = await acquireEnhancedLock(lockKey, 300);
 
   if (!lockResult.acquired) {
     logger.warn({

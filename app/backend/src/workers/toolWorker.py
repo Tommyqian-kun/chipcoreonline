@@ -10,6 +10,7 @@ import uuid
 import threading
 import requests
 import platform
+import functools
 from typing import Dict, Any, Optional, List
 from sqlalchemy import create_engine, Column, String, Text, DateTime, Enum, JSON, Boolean, Integer
 from sqlalchemy.orm import sessionmaker
@@ -114,9 +115,46 @@ def get_deployment_mode():
     """获取部署模式"""
     return os.environ.get('DEPLOYMENT_MODE', 'ecs_only')
 
+def retry_on_network_error(max_retries=3, base_delay=1.0):
+    """
+    重试装饰器：在网络错误或超时时重试API调用
+
+    Args:
+        max_retries: 最大重试次数（默认3次）
+        base_delay: 基础延迟秒数（使用指数退避：1s, 2s, 4s）
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except requests.exceptions.RequestException as e:
+                    last_exception = e
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        logging.warning(f"API call failed (attempt {attempt + 1}/{max_retries}): {str(e)}. Retrying in {delay}s...")
+                        time.sleep(delay)
+                    else:
+                        logging.error(f"API call failed after {max_retries} attempts: {str(e)}")
+                except Exception as e:
+                    # 非网络相关的错误不重试，直接抛出
+                    raise e
+
+            # 所有重试都失败，抛出最后的异常
+            raise last_exception
+        return wrapper
+    return decorator
+
 def update_task_status_via_api(task_id, status, additional_data=None):
     """通过内部API更新任务状态，确保WebSocket通知和前端状态同步"""
     try:
+        # 强制要求环境变量，不使用默认值
+        internal_api_key = os.environ.get('INTERNAL_API_KEY')
+        if not internal_api_key:
+            raise ValueError("INTERNAL_API_KEY environment variable is required for secure operation")
+
         api_base = os.environ.get('API_BASE_URL', 'http://localhost:8080')
         url = f"{api_base}/api/v1/tasks/internal/{task_id}/status"
 
@@ -128,10 +166,10 @@ def update_task_status_via_api(task_id, status, additional_data=None):
         if additional_data:
             payload.update(additional_data)
 
-        # 使用内部API密钥进行认证（如果配置了的话）
+        # 使用强制的内部API密钥进行认证
         headers = {
             'Content-Type': 'application/json',
-            'X-Internal-API-Key': os.environ.get('INTERNAL_API_KEY', 'worker-internal-key')
+            'X-Internal-API-Key': internal_api_key
         }
 
         response = requests.put(url, json=payload, headers=headers, timeout=10)
@@ -141,10 +179,54 @@ def update_task_status_via_api(task_id, status, additional_data=None):
         else:
             logging.error(f"Failed to update task {task_id} status via API: {response.status_code} {response.text}")
 
+    except ValueError as ve:
+        # 专门处理环境变量缺失错误
+        logging.error(f"Configuration error: {str(ve)}")
+        raise
     except Exception as e:
         logging.error(f"Error updating task {task_id} status via API: {str(e)}")
         # 如果API调用失败，至少记录到日志中
         logging.error(f"Task {task_id} status should be: {status}, additional_data: {additional_data}")
+
+def _update_task_status_via_api_internal(task_id, status, additional_data=None):
+    """
+    内部API调用函数，会抛出异常以支持重试机制
+
+    这个函数与update_task_status_via_api的区别：
+    - 不捕获异常，让装饰器处理重试
+    - 只用于update_task_status_via_api_with_retry内部
+    """
+    # 强制要求环境变量
+    internal_api_key = os.environ.get('INTERNAL_API_KEY')
+    if not internal_api_key:
+        raise ValueError("INTERNAL_API_KEY environment variable is required for secure operation")
+
+    api_base = os.environ.get('API_BASE_URL', 'http://localhost:8080')
+    url = f"{api_base}/api/v1/tasks/internal/{task_id}/status"
+
+    payload = {
+        'status': status,
+        'updatedAt': datetime.now(timezone.utc).isoformat()
+    }
+
+    if additional_data:
+        payload.update(additional_data)
+
+    headers = {
+        'Content-Type': 'application/json',
+        'X-Internal-API-Key': internal_api_key
+    }
+
+    response = requests.put(url, json=payload, headers=headers, timeout=10)
+
+    if response.status_code == 200:
+        logging.info(f"Successfully updated task {task_id} status to {status} via API (with retry)")
+    else:
+        # 对于非200状态码，抛出异常以触发重试
+        raise requests.exceptions.HTTPError(f"API returned status {response.status_code}: {response.text}")
+
+# 应用重试装饰器创建带重试的API调用函数
+update_task_status_via_api_with_retry = retry_on_network_error(max_retries=3, base_delay=1.0)(_update_task_status_via_api_internal)
 
 def is_ecs_only_mode():
     """检查是否为ECS Only模式"""
@@ -363,9 +445,9 @@ class TaskLogger:
                         'taskId': self.task_id
                     })
 
-                    # 通过API发送WebSocket通知给前端
+                    # 通过API发送WebSocket通知给前端（使用带重试的版本）
                     try:
-                        update_task_status_via_api(self.task_id, task.status, {
+                        update_task_status_via_api_with_retry(self.task_id, task.status, {
                             'progress': progress,
                             'currentStep': current_step
                         })
@@ -1193,9 +1275,9 @@ def process_task(task_id):
         task.startedAt = datetime.now(timezone.utc)
         session.commit()
 
-        # 通过API发送RUNNING状态通知给前端
+        # 通过API发送RUNNING状态通知给前端（使用带重试的版本）
         try:
-            update_task_status_via_api(task_id, 'RUNNING', {
+            update_task_status_via_api_with_retry(task_id, 'RUNNING', {
                 'startedAt': task.startedAt.isoformat(),
                 'progress': 10,
                 'currentStep': 'STARTING_EXECUTION'
@@ -1232,9 +1314,9 @@ def process_task(task_id):
             task.status = 'COMPLETED'
             task.finishedAt = datetime.now(timezone.utc)
             logging.info(f"Task {task_id} completed successfully")
-            # 通过API更新状态，确保前端能收到状态更新，包含完整的进度信息
+            # 通过API更新状态，确保前端能收到状态更新，包含完整的进度信息（使用带重试的版本）
             try:
-                update_task_status_via_api(task_id, 'COMPLETED', {
+                update_task_status_via_api_with_retry(task_id, 'COMPLETED', {
                     'finishedAt': task.finishedAt.isoformat(),
                     'progress': 100,
                     'currentStep': 'COMPLETED'
@@ -1246,9 +1328,9 @@ def process_task(task_id):
             task.finishedAt = datetime.now(timezone.utc)
             # 保留currentStep和progress，显示失败时的实际执行进度
             logging.error(f"Task {task_id} failed")
-            # 通过API更新状态，确保前端能收到状态更新
+            # 通过API更新状态，确保前端能收到状态更新（使用带重试的版本）
             try:
-                update_task_status_via_api(task_id, 'FAILED', {
+                update_task_status_via_api_with_retry(task_id, 'FAILED', {
                     'finishedAt': task.finishedAt.isoformat(),
                     'errorMessage': 'Task execution failed',
                     'currentStep': task.currentStep,  # 保留失败时的执行步骤
@@ -1265,9 +1347,9 @@ def process_task(task_id):
             task.errorMessage = error_msg
             task.finishedAt = datetime.now(timezone.utc)
             # 保留currentStep和progress，显示超时时的实际执行进度
-            # 通过API更新数据库状态，确保前端能收到状态更新
+            # 通过API更新数据库状态，确保前端能收到状态更新（使用带重试的版本）
             try:
-                update_task_status_via_api(task_id, 'FAILED', {
+                update_task_status_via_api_with_retry(task_id, 'FAILED', {
                     'errorMessage': error_msg,
                     'finishedAt': task.finishedAt.isoformat(),
                     'currentStep': task.currentStep,  # 保留超时时的执行步骤
@@ -1283,9 +1365,9 @@ def process_task(task_id):
             task.errorMessage = error_msg
             task.finishedAt = datetime.now(timezone.utc)
             # 保留currentStep和progress，显示异常时的实际执行进度
-            # 通过API更新数据库状态，确保前端能收到状态更新
+            # 通过API更新数据库状态，确保前端能收到状态更新（使用带重试的版本）
             try:
-                update_task_status_via_api(task_id, 'FAILED', {
+                update_task_status_via_api_with_retry(task_id, 'FAILED', {
                     'errorMessage': error_msg,
                     'finishedAt': task.finishedAt.isoformat(),
                     'currentStep': task.currentStep,  # 保留异常时的执行步骤
@@ -1862,11 +1944,11 @@ def process_task_ecs_only(task, task_logger, session):
                     'finishedAt': task.finishedAt.isoformat() if task.finishedAt else 'Not set'
                 })
 
-                # 通过API发送任务完成通知
+                # 通过API发送任务完成通知（使用带重试的版本）
                 # 注意：不再传递downloadTimeRemaining，后端API会基于finishedAt动态计算
                 try:
                     finished_at_value = task.finishedAt.isoformat() if task.finishedAt else datetime.now(timezone.utc).isoformat()
-                    update_task_status_via_api(task.id, 'COMPLETED', {
+                    update_task_status_via_api_with_retry(task.id, 'COMPLETED', {
                         'outputFile': result_zip,
                         'downloadStatus': 'AVAILABLE',
                         'finishedAt': finished_at_value,
@@ -3014,6 +3096,10 @@ def load_image_from_tar(image_name, task_logger):
 if __name__ == '__main__':
     logging.info("Starting Python Task Worker...")
 
+    # 孤儿容器清理计数器（每10次空闲循环执行一次，约5分钟）
+    orphan_cleanup_counter = 0
+    ORPHAN_CLEANUP_INTERVAL = 10
+
     # 简单的Worker循环，直接监听Redis队列
     while True:
         try:
@@ -3042,6 +3128,17 @@ if __name__ == '__main__':
                 except Exception as e:
                     logging.error(f"Error processing task {task_id}: {e}", exc_info=True)
             else:
+                # 没有任务时，检查是否需要执行孤儿容器清理
+                orphan_cleanup_counter += 1
+                if orphan_cleanup_counter >= ORPHAN_CLEANUP_INTERVAL:
+                    try:
+                        logging.info("Running periodic orphan container cleanup...")
+                        cleaned_count = container_manager.cleanup_orphaned_containers()
+                        logging.info(f"Orphan container cleanup completed: {cleaned_count} containers cleaned")
+                        orphan_cleanup_counter = 0
+                    except Exception as cleanup_error:
+                        logging.error(f"Error during orphan container cleanup: {cleanup_error}")
+
                 logging.info("No tasks in queue, continuing to wait...")
 
         except KeyboardInterrupt:

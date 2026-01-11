@@ -246,21 +246,42 @@ export class TaskQueueService {
 
   /**
    * 清理过期的用户任务记录
+   *
+   * 使用SCAN命令代替KEYS，避免在大数据量时阻塞Redis服务器
+   * SCAN是增量式迭代，不会阻塞其他客户端
    */
   async cleanupExpiredUserTasks(): Promise<void> {
     try {
       const redis = await this.getRedisClient();
 
-      // 这个方法可以通过定时任务调用，清理过期的用户任务记录
+      // 使用SCAN代替KEYS，避免阻塞
       const pattern = `${this.USER_TASKS_PREFIX}*`;
-      const keys = await redis.keys(pattern);
+      const keys: string[] = [];
+      let cursor = '0';
 
-      for (const key of keys) {
-        const ttl = await redis.ttl(key);
-        if (ttl === -1) {
-          // 没有设置过期时间的key，设置24小时过期
-          await redis.expire(key, 24 * 60 * 60);
+      do {
+        // SCAN返回 [nextCursor, arrayOfKeys]
+        const [nextCursor, batch] = await redis.scan(
+          cursor,
+          'MATCH',
+          pattern,
+          'COUNT',
+          100  // 每次返回最多100个key
+        );
+
+        keys.push(...batch);
+        cursor = nextCursor;
+
+        // 防止一次性处理太多key，分批处理
+        if (keys.length >= 1000) {
+          await this.processKeysBatch(redis, keys);
+          keys.length = 0;  // 清空数组继续收集
         }
+      } while (cursor !== '0');
+
+      // 处理剩余的keys
+      if (keys.length > 0) {
+        await this.processKeysBatch(redis, keys);
       }
 
       logger.info({
@@ -271,6 +292,27 @@ export class TaskQueueService {
       logger.error({
         error: error instanceof Error ? error.message : 'Unknown error'
       }, 'Error during user task cleanup');
+    }
+  }
+
+  /**
+   * 批量处理keys的辅助方法
+   * @private
+   */
+  private async processKeysBatch(redis: any, keys: string[]): Promise<void> {
+    for (const key of keys) {
+      try {
+        const ttl = await redis.ttl(key);
+        if (ttl === -1) {
+          // 没有设置过期时间的key，设置24小时过期
+          await redis.expire(key, 24 * 60 * 60);
+        }
+      } catch (error) {
+        logger.error({
+          error: error instanceof Error ? error.message : 'Unknown error',
+          key
+        }, 'Error processing individual key during cleanup');
+      }
     }
   }
 }

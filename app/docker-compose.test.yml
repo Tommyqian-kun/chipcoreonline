@@ -1,0 +1,97 @@
+version: '3.8'
+
+# Docker Compose 测试环境配置
+# 使用独立的测试数据库和Redis，避免污染开发环境
+# 注意：镜像版本与docker-compose.yml保持一致
+services:
+  # 测试数据库 - 使用与生产相同的PostgreSQL版本
+  test-postgres:
+    image: postgres:11-alpine
+    container_name: logiccore_test_postgres
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: logiccore_test
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+      # 性能优化配置（与docker-compose.yml一致）
+      POSTGRES_SHARED_BUFFERS: 256MB
+      POSTGRES_EFFECTIVE_CACHE_SIZE: 1GB
+      POSTGRES_WORK_MEM: 4MB
+    ports:
+      - "5433:5432"
+    volumes:
+      - test_postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    restart: unless-stopped
+    # 资源限制
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    # 健康检查
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d logiccore_test"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # 网络配置
+    networks:
+      - test_network
+
+  # 测试Redis - 使用与生产相同的Redis版本
+  test-redis:
+    image: redis:5-alpine
+    container_name: logiccore_test_redis
+    ports:
+      - "6380:6379"
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    volumes:
+      - test_redis_data:/data
+    # 资源限制
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    # 网络配置
+    networks:
+      - test_network
+
+# 网络配置
+networks:
+  test_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+
+# 数据卷配置
+volumes:
+  test_postgres_data:
+    driver: local
+  test_redis_data:
+    driver: local

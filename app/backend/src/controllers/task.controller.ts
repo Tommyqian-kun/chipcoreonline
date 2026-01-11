@@ -545,11 +545,24 @@ export const updateTaskStatusInternal = async (req: Request, res: Response) => {
     const { taskId } = req.params;
     const { status, errorMessage, finishedAt, outputFile, logFile, currentStep, progress, downloadStatus, downloadTimeRemaining } = req.body;
 
-    // 验证内部API密钥
-    const internalApiKey = req.headers['x-internal-api-key'];
-    const expectedKey = process.env.INTERNAL_API_KEY || 'worker-internal-key';
+    // 验证内部API密钥（强制要求环境变量，不使用默认值）
+    const expectedKey = process.env.INTERNAL_API_KEY;
 
-    if (internalApiKey !== expectedKey) {
+    if (!expectedKey) {
+      console.error('INTERNAL_API_KEY environment variable is not set');
+      return res.status(500).json({
+        success: false,
+        message: 'Server configuration error'
+      });
+    }
+
+    const providedKey = req.headers['x-internal-api-key'];
+
+    if (!providedKey || providedKey !== expectedKey) {
+      console.warn({
+        ip: req.ip,
+        userAgent: req.headers['user-agent']
+      }, 'Internal API authentication failed');
       return res.status(401).json({
         success: false,
         message: 'Unauthorized: Invalid internal API key'

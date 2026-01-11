@@ -13,6 +13,7 @@ import { createTaskLogger, TaskLogger } from './task-logger.service';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { redisPool } from './redis-pool.service';
+import { sanitizeFileName, generateSafeFilePath } from '../utils/file-security';
 
 export const createTask = async (body: any, userId: string, inputFiles?: Express.Multer.File[]): Promise<Task> => {
     // 标记：订阅中间件已经预留了并发槽位
@@ -178,9 +179,18 @@ export const createTask = async (body: any, userId: string, inputFiles?: Express
         await taskLogger.logStepStart('TEMP_FILE_UPLOAD', 'Saving uploaded files to temp directory');
 
         for (const file of inputFiles) {
-            const filePath = path.join(tempDir, file.originalname);
-            await fs.writeFile(filePath, file.buffer);
-            inputFilePaths.push(file.originalname);
+            // 验证并清理文件名，防止路径遍历攻击
+            const safeFilePath = generateSafeFilePath(tempDir, file.originalname);
+            const { safeName } = sanitizeFileName(file.originalname);
+
+            await fs.writeFile(safeFilePath, file.buffer);
+            inputFilePaths.push(safeName);
+
+            logger.debug({
+                originalName: file.originalname,
+                safeName,
+                safeFilePath
+            }, 'File sanitized and saved');
         }
 
         await taskLogger.logStepSuccess('TEMP_FILE_UPLOAD', 'Files saved to temp directory', {
@@ -207,13 +217,17 @@ export const createTask = async (body: any, userId: string, inputFiles?: Express
         // 如果入队失败，清理已创建的资源
         await taskLogger.logStepError('TASK_ENQUEUE', 'Failed to enqueue task', new Error('Atomic enqueue failed'));
 
-        // 【新增】释放已预留的并发槽位
+        // 【增强】释放已预留的并发槽位（使用带重试的方法提高可靠性）
         try {
             const { userConcurrentCheck } = await import('./user-concurrent-check.service');
-            await userConcurrentCheck.releaseConcurrentSlot(userId);
-            logger.info({ userId, taskId }, 'Released concurrent slot after enqueue failure');
+            const releaseSuccess = await userConcurrentCheck.releaseConcurrentSlotWithRetry(userId);
+            if (releaseSuccess) {
+                logger.info({ userId, taskId }, 'Released concurrent slot after enqueue failure');
+            } else {
+                logger.error({ userId, taskId }, 'Failed to release concurrent slot after all retries');
+            }
         } catch (releaseError) {
-            logger.error({ userId, taskId, error: releaseError }, 'Failed to release concurrent slot after enqueue failure');
+            logger.error({ userId, taskId, error: releaseError }, 'Exception during slot release after enqueue failure');
         }
 
         // 清理temp目录
@@ -270,10 +284,14 @@ export const createTask = async (body: any, userId: string, inputFiles?: Express
         if (slotReserved) {
             try {
                 const { userConcurrentCheck } = await import('./user-concurrent-check.service');
-                await userConcurrentCheck.releaseConcurrentSlot(userId);
-                logger.warn({ userId, error: error instanceof Error ? error.message : 'Unknown error' }, 'Released concurrent slot due to task creation failure');
+                const releaseSuccess = await userConcurrentCheck.releaseConcurrentSlotWithRetry(userId);
+                if (releaseSuccess) {
+                    logger.warn({ userId, error: error instanceof Error ? error.message : 'Unknown error' }, 'Released concurrent slot due to task creation failure');
+                } else {
+                    logger.error({ userId }, 'Failed to release concurrent slot after all retries during error handling');
+                }
             } catch (releaseError) {
-                logger.error({ userId, error: releaseError }, 'Failed to release concurrent slot during error handling');
+                logger.error({ userId, error: releaseError }, 'Exception during slot release in error handling');
             }
         }
 
@@ -586,22 +604,30 @@ export const updateTaskStatus = async (
             );
         }
 
-        // 【新增】任务完成/失败/取消时释放并发槽位
+        // 【增强】任务完成/失败/取消时释放并发槽位（使用带重试的方法提高可靠性）
         if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(status)) {
             try {
                 const { userConcurrentCheck } = await import('./user-concurrent-check.service');
-                await userConcurrentCheck.releaseConcurrentSlot(updatedTask.userId);
-                logger.info({
-                    taskId,
-                    userId: updatedTask.userId,
-                    status
-                }, 'Released concurrent slot for completed/failed/cancelled task');
+                const releaseSuccess = await userConcurrentCheck.releaseConcurrentSlotWithRetry(updatedTask.userId);
+                if (releaseSuccess) {
+                    logger.info({
+                        taskId,
+                        userId: updatedTask.userId,
+                        status
+                    }, 'Released concurrent slot for completed/failed/cancelled task');
+                } else {
+                    logger.error({
+                        taskId,
+                        userId: updatedTask.userId,
+                        status
+                    }, 'Failed to release concurrent slot after all retries');
+                }
             } catch (releaseError) {
                 logger.error({
                     taskId,
                     userId: updatedTask.userId,
                     error: releaseError instanceof Error ? releaseError.message : 'Unknown error'
-                }, 'Failed to release concurrent slot for completed task');
+                }, 'Exception during concurrent slot release');
             }
 
             // 清理TaskID（从Redis活跃集合中移除）

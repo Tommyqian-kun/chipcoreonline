@@ -6,6 +6,7 @@ import jwt from 'jsonwebtoken';
 import { prisma } from '../utils/database'; // Import shared prisma instance
 import { JwtBlacklistService } from './jwt-blacklist.service';
 import { redisPool } from './redis-pool.service';
+import { loginProtection } from './login-protection.service';
 
 // 生成6位数字验证码
 const generateVerificationCode = (): string => {
@@ -150,6 +151,17 @@ export const resendVerificationCode = async (email: string): Promise<boolean> =>
 };
 
 export const loginUser = async (email: string, password: string): Promise<{ token: string; user: { id: string, email: string, name: string | null, avatar: string | null, isVerified: boolean, role: string, createdAt: string } } | null> => {
+  // 检查登录尝试次数
+  const checkResult = await loginProtection.checkLoginAttempts(email);
+  if (!checkResult.allowed) {
+    // 账户已锁定
+    const lockMinutes = Math.ceil((checkResult.lockTimeRemaining || 0) / 60);
+    const error = new Error('AccountLocked') as any;
+    error.lockTimeRemaining = checkResult.lockTimeRemaining;
+    error.lockMinutes = lockMinutes;
+    throw error;
+  }
+
   const user = await prisma.user.findUnique({
     where: { email },
     select: {
@@ -171,6 +183,7 @@ export const loginUser = async (email: string, password: string): Promise<{ toke
 
   const isPasswordMatch = await bcrypt.compare(password, user.password);
   if (!isPasswordMatch) {
+    // 密码错误，但不重置计数（已在checkLoginAttempts中递增）
     return null;
   }
 
@@ -178,6 +191,9 @@ export const loginUser = async (email: string, password: string): Promise<{ toke
     // 抛出特定错误，以便控制器可以识别并给出相应提示
     throw new Error('EmailNotVerified');
   }
+
+  // 登录成功，重置失败计数
+  await loginProtection.resetLoginAttempts(email);
 
   // 生成 JWT
   const jwtSecret = process.env.JWT_SECRET;
@@ -188,7 +204,7 @@ export const loginUser = async (email: string, password: string): Promise<{ toke
 
   // 包含用户角色信息在JWT中，并添加签发时间
   const token = jwt.sign(
-    { 
+    {
       id: user.id,
       email: user.email,
       role: user.role,
