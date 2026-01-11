@@ -130,9 +130,8 @@ export class TaskStateSyncService {
         for (const task of runningTasks) {
           if (inconsistencies.inDbNotInRedis.includes(task.id)) {
             if (task.status === 'PENDING') {
-              // 重新加入队列
-              await redisClient.rpush('task_queue', task.id);
-              await redisClient.sadd('active_task_ids', task.id);
+              // 重新加入队列（使用原子操作确保一致性）
+              await redisPool.atomicEnqueueWithActiveSet('task_queue', 'active_task_ids', task.id);
               logger.info({ taskId: task.id }, 'Re-queued pending task');
             } else if (task.status === 'RUNNING') {
               // 检查是否超时
@@ -242,9 +241,8 @@ export class TaskStateSyncService {
         const isInActiveSet = await redisClient.sismember('active_task_ids', task.id);
 
         if (isInQueue === null && !isInActiveSet) {
-          // 任务不在Redis中，重新加入队列
-          await redisClient.rpush('task_queue', task.id);
-          await redisClient.sadd('active_task_ids', task.id);
+          // 任务不在Redis中，重新加入队列（使用原子操作确保一致性）
+          await redisPool.atomicEnqueueWithActiveSet('task_queue', 'active_task_ids', task.id);
           logger.info({ taskId: task.id }, 'Re-queued stuck pending task');
         }
       }

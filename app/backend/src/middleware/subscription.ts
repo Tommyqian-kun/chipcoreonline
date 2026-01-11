@@ -95,8 +95,8 @@ export const checkTaskExecutionPermission = async (req: Request, res: Response, 
 
       if (totalUsage >= limits.totalUsageLimit) {
         console.log(`🚫 [PERMISSION] 免费用户使用次数达到上限 - 用户: ${userId}, 已使用: ${totalUsage}, 限制: ${limits.totalUsageLimit}`);
-        // 使用次数超限，释放已预留的并发槽位
-        await userConcurrentCheck.releaseConcurrentSlot(userId);
+        // 使用次数超限，释放已预留的并发槽位（使用带重试的方法提高可靠性）
+        await userConcurrentCheck.releaseConcurrentSlotWithRetry(userId);
         return res.status(403).json({
           message: `您的免费使用次数已达上限（${limits.totalUsageLimit}次）。请升级到专业版继续享受完整的工具服务。`,
           code: 'TOTAL_USAGE_LIMIT_EXCEEDED',
@@ -128,8 +128,8 @@ export const checkTaskExecutionPermission = async (req: Request, res: Response, 
 
       if (monthlyUsage >= limits.monthlyLimit) {
         console.log(`🚫 [PERMISSION] 专业用户月度使用次数达到上限 - 用户: ${userId}, 本月已使用: ${monthlyUsage}, 限制: ${limits.monthlyLimit}`);
-        // 月度使用超限，释放已预留的并发槽位
-        await userConcurrentCheck.releaseConcurrentSlot(userId);
+        // 月度使用超限，释放已预留的并发槽位（使用带重试的方法提高可靠性）
+        await userConcurrentCheck.releaseConcurrentSlotWithRetry(userId);
         return res.status(403).json({
           message: `您本月的使用额度已消耗完毕（${limits.monthlyLimit}次）。请等待下月重置或联系客服。`,
           code: 'MONTHLY_LIMIT_EXCEEDED',
@@ -158,9 +158,14 @@ export const checkTaskExecutionPermission = async (req: Request, res: Response, 
 
     next();
   } catch (error) {
-    // 发生异常时释放已预留的槽位
+    // 发生异常时释放已预留的槽位（使用带重试的方法提高可靠性）
     try {
-      await userConcurrentCheck.releaseConcurrentSlot(userId);
+      const releaseSuccess = await userConcurrentCheck.releaseConcurrentSlotWithRetry(userId);
+      if (!releaseSuccess) {
+        logger.error({
+          userId
+        }, 'Failed to release concurrent slot after retries during error handling');
+      }
     } catch (releaseError) {
       logger.error({
         error: releaseError instanceof Error ? releaseError.message : 'Unknown error',

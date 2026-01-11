@@ -163,6 +163,56 @@ export class UserConcurrentCheckService {
   }
 
   /**
+   * 释放用户并发槽位（带重试）
+   *
+   * 在以下情况调用：
+   * 1. 任务完成（COMPLETED）
+   * 2. 任务失败（FAILED）
+   * 3. 任务取消（CANCELLED）
+   * 4. 任务提交失败需要回滚
+   *
+   * @param userId 用户ID
+   * @param maxRetries 最大重试次数（默认3次）
+   */
+  async releaseConcurrentSlotWithRetry(userId: string, maxRetries = 3): Promise<boolean> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await this.releaseConcurrentSlot(userId);
+        logger.info({
+          userId,
+          attempt,
+          maxRetries
+        }, 'Slot released with retry successful');
+        return true;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        logger.warn({
+          userId,
+          attempt,
+          maxRetries,
+          error: lastError.message
+        }, 'Slot release attempt failed, retrying...');
+
+        // 指数退避：100ms, 200ms, 400ms
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, 100 * Math.pow(2, attempt - 1)));
+        }
+      }
+    }
+
+    // 所有重试都失败
+    logger.error({
+      userId,
+      maxRetries,
+      error: lastError?.message
+    }, 'Slot release failed after all retries');
+
+    return false;
+  }
+
+  /**
    * 释放用户并发槽位
    *
    * 在以下情况调用：

@@ -358,6 +358,92 @@ export class RedisPoolService {
   }
 
   /**
+   * 原子操作：将任务加入队列和活跃集合（用于状态恢复场景）
+   * 与atomicEnqueueIfNotFull的区别：不检查队列长度，直接入队
+   */
+  public async atomicEnqueueWithActiveSet(queueKey: string, activeSetKey: string, taskId: string): Promise<void> {
+    const lua = `
+      local queueKey = KEYS[1]
+      local activeSetKey = KEYS[2]
+      local taskId = ARGV[1]
+
+      -- 原子性地将任务加入队列和活跃集合
+      redis.call('RPUSH', queueKey, taskId)
+      redis.call('SADD', activeSetKey, taskId)
+      return 1
+    `;
+
+    try {
+      await this.redisClient.eval(lua, 2, queueKey, activeSetKey, taskId);
+
+      logger.info({
+        queueKey,
+        activeSetKey,
+        taskId
+      }, 'Atomic enqueue with active set completed');
+    } catch (error) {
+      logger.error({
+        queueKey,
+        activeSetKey,
+        taskId,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }, 'Atomic enqueue with active set failed');
+      throw error;
+    }
+  }
+
+  /**
+   * 原子操作：检查队列长度并预留检查结果
+   *
+   * 用途：initializeTask时检查队列是否有剩余空间
+   * 返回：{allowed: boolean, currentLength: number, maxLength: number}
+   *
+   * 设计说明：
+   * 使用Lua脚本确保检查的原子性，避免高并发下的竞态条件
+   * 只检查不入队，因为DRAFT任务不占用队列槽位
+   */
+  public async atomicCheckQueueCapacity(queueKey: string, maxLength: number): Promise<{
+    allowed: boolean;
+    currentLength: number;
+    maxLength: number;
+  }> {
+    const lua = `
+      local queueKey = KEYS[1]
+      local maxLength = tonumber(ARGV[1])
+
+      -- 原子性地检查队列长度
+      local currentLength = redis.call('LLEN', queueKey)
+      local allowed = currentLength < maxLength
+
+      return {allowed, currentLength, maxLength}
+    `;
+
+    try {
+      const result = await this.redisClient.eval(lua, 1, queueKey, maxLength.toString()) as number[];
+
+      const allowed = result[0] === 1;
+      const currentLength = result[1];
+      const maxLen = result[2];
+
+      logger.debug({
+        queueKey,
+        maxLength,
+        currentLength,
+        allowed
+      }, 'Atomic queue capacity check completed');
+
+      return { allowed, currentLength, maxLength: maxLen };
+    } catch (error) {
+      logger.error({
+        queueKey,
+        maxLength,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }, 'Atomic queue capacity check failed');
+      throw error;
+    }
+  }
+
+  /**
    * 原子操作：从队列和活跃集合中移除任务
    */
   public async atomicDequeue(queueKey: string, activeSetKey: string): Promise<string | null> {

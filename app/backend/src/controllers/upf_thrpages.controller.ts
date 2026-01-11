@@ -44,18 +44,17 @@ export const initializeTask = async (req: Request, res: Response) => {
       return res.status(400).json({ error: '必须上传hier.yaml、pvlog.v、pobj.tcl和pcell.yaml文件' });
     }
 
-    // 检查Redis队列上限
-    const redis = redisPool.getClient();
-    const queueLength = await redis.llen('task_queue');
-    const maxQueueSize = parseInt(process.env.MAX_QUEUE_SIZE || '48');
-
-    if (queueLength >= maxQueueSize) {
-      return res.status(429).json({
-        error: '由于目前任务比较多，请稍后再使用',
-        queueLength,
-        maxQueueSize
-      });
-    }
+    // 【设计说明】移除了队列上限检查
+    // 原因：
+    // 1. DRAFT任务不入队，不占用队列槽位
+    // 2. 用户可以随时创建DRAFT任务进行编辑
+    // 3. 真正的队列限制在submitTask时检查（已使用原子操作）
+    // 4. 这样可以保证用户体验：用户上传的文件不会丢失，DRAFT任务可以稍后提交
+    //
+    // 业务流程：
+    // 1. initializeTask: 创建DRAFT任务（不检查队列）
+    // 2. 用户编辑Excel（可能数小时）
+    // 3. submitTask: 检查队列并入队（如果队列满，返回友好提示，DRAFT任务保留）
 
     // 创建任务ID
     taskId = uuidv4();
@@ -81,7 +80,6 @@ export const initializeTask = async (req: Request, res: Response) => {
       }
 
       console.log('✅ [UPF-THRPAGES] 文件上传验证通过');
-      console.log('📊 [UPF-THRPAGES] 队列状态:', { queueLength, maxQueueSize });
       console.log('🆔 [UPF-THRPAGES] 生成任务ID:', taskId);
 
       // 使用环境变量创建正确的目录路径
@@ -323,16 +321,22 @@ export const initializeTask = async (req: Request, res: Response) => {
       cleanupTaskLogger(taskId);
     }
 
-    // 【新增】DRAFT状态的任务不应占用并发槽位，立即释放
+    // 【修复】DRAFT状态的任务不应占用并发槽位，立即释放
     // 订阅中间件在initialize时预留了槽位，但DRAFT任务还未真正执行
     // 真正的并发检查应该在submitTask时进行
+    // 使用带重试的方法提高可靠性，但不改变业务逻辑
     try {
       const { userConcurrentCheck } = await import('../services/user-concurrent-check.service');
-      await userConcurrentCheck.releaseConcurrentSlot(userId);
-      console.log(`✅ [UPF-THRPAGES] DRAFT任务不占用并发槽位，已释放: 用户=${userId}, 任务=${taskId}`);
+      const releaseSuccess = await userConcurrentCheck.releaseConcurrentSlotWithRetry(userId);
+      if (releaseSuccess) {
+        console.log(`✅ [UPF-THRPAGES] DRAFT任务不占用并发槽位，已释放: 用户=${userId}, 任务=${taskId}`);
+      } else {
+        console.error(`⚠️ [UPF-THRPAGES] DRAFT任务槽位释放失败（已重试）: 用户=${userId}, 任务=${taskId}`);
+      }
     } catch (releaseError) {
-      console.error(`⚠️ [UPF-THRPAGES] 释放DRAFT任务并发槽位失败:`, releaseError);
+      console.error(`⚠️ [UPF-THRPAGES] 释放DRAFT任务并发槽位异常:`, releaseError);
       // 不影响主流程，继续返回成功
+      // TTL机制会在约43分钟后自动清理槽位
     }
 
     res.json({
@@ -351,6 +355,7 @@ export const initializeTask = async (req: Request, res: Response) => {
 
   } catch (error) {
     // 如果初始化失败，槽位会被订阅中间件的异常处理逻辑自动释放
+    // 不重新抛出错误，避免双重释放
     if (taskLogger) {
       console.error('初始化任务失败:', error);
       taskLogger.logError('初始化任务失败', error);
@@ -700,14 +705,20 @@ export const submitTask = async (req: Request, res: Response) => {
 
       operationLogger.stepComplete('AUTH', '任务权限验证通过');
 
-      // 将任务加入Redis队列
+      // 将任务加入Redis队列（使用原子操作确保队列检查和入队的原子性）
       operationLogger.stepStart('QUEUE', '将任务加入Redis队列');
       operationLogger.info(`队列名称: task_queue`);
       console.log(`🔄 [UPF-THRPAGES] 将任务加入Redis队列:`, { taskId, queueName: 'task_queue' });
-      const redis = redisPool.getClient();
-      await redis.rpush('task_queue', taskId);
+      const maxQueueSize = parseInt(process.env.MAX_QUEUE_SIZE || '48');
+      const enqueueSuccess = await redisPool.atomicEnqueueIfNotFull('task_queue', taskId, maxQueueSize);
+
+      if (!enqueueSuccess) {
+        operationLogger.stepFailed('QUEUE', '任务队列已满');
+        throw new Error('任务队列已满，请稍后再试');
+      }
 
       // 验证任务是否成功入队
+      const redis = redisPool.getClient();
       const queueLength = await redis.llen('task_queue');
       operationLogger.stepComplete('QUEUE', `任务入队成功，当前队列长度: ${queueLength}`);
       console.log(`✅ [UPF-THRPAGES] 任务入队成功:`, { taskId, currentQueueLength: queueLength });
@@ -748,14 +759,18 @@ export const submitTask = async (req: Request, res: Response) => {
     });
 
   } catch (error) {
-    // 【新增】如果提交失败且槽位已预留，需要释放槽位
+    // 【新增】如果提交失败且槽位已预留，需要释放槽位（使用带重试的方法提高可靠性）
     if (slotReserved) {
       try {
         const { userConcurrentCheck } = await import('../services/user-concurrent-check.service');
-        await userConcurrentCheck.releaseConcurrentSlot(req.user?.id || '');
-        console.log(`✅ [UPF-THRPAGES] 提交失败，已释放并发槽位: 用户=${req.user?.id}`);
+        const releaseSuccess = await userConcurrentCheck.releaseConcurrentSlotWithRetry(req.user?.id || '');
+        if (releaseSuccess) {
+          console.log(`✅ [UPF-THRPAGES] 提交失败，已释放并发槽位: 用户=${req.user?.id}`);
+        } else {
+          console.error(`⚠️ [UPF-THRPAGES] 释放并发槽位失败（重试后仍失败）: 用户=${req.user?.id}`);
+        }
       } catch (releaseError) {
-        console.error(`⚠️ [UPF-THRPAGES] 释放并发槽位失败:`, releaseError);
+        console.error(`⚠️ [UPF-THRPAGES] 释放并发槽位异常:`, releaseError);
       }
     }
 
