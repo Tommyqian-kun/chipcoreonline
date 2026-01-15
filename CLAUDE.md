@@ -58,7 +58,9 @@
 
 ## 项目概述
 
-LogicCore 是一个专为芯片设计工程师打造的在线EDA工具平台，提供SDC约束生成、UPF功耗规范生成等自动化工具。项目采用前后端分离架构，支持ECS Only和ECS+OSS+ACR双部署模式。
+LogicCore 是一个专为芯片设计工程师打造的在线EDA工具平台，提供SDC约束生成、UPF功耗规范生成等自动化工具。项目采用前后端分离架构，支持ECS Only和ECS+OSS+ACR双部署模式，工具任务支持多页面和单页面方式。
+
+但是目前阶段我们开发测试都是针对ECS Only模式多页面交互应用场景，所有feature，bug fix和功能开发测试都是ECS Only模式多页面交互，暂时忽略考虑ECS+OSS+ACR部署模式和单页面方式，请务必遵循这个开发模式和策略。
 
 ### 技术栈
 - **前端**: React 18 + TypeScript + Vite + Tailwind CSS + shadcn/ui
@@ -161,6 +163,7 @@ curl http://localhost:8080/admin/services/status
 - Docker镜像使用ACR
 - 适合分布式生产环境
 
+目前我们采用ECS Only模式多页面交互应用场景。
 ### 任务执行架构
 
 **关键流程**:
@@ -461,3 +464,17 @@ docker exec -it app_redis_1 redis-cli MONITOR
 4. **环境变量检查**: 确保 `.env.local` 配置正确
 5. **端口占用**: 确保5432 (PostgreSQL)、6379 (Redis)、8080 (API)、3000 (Frontend) 端口可用
 6. **测试运行要求**：要求测试运行项目代码始终都在wsl2环境里，并使用wsl2环境里安装的chrome浏览器来测试，不要通过转发到windows来打开浏览器，直接在wsl2环境里测试运行项目的所有代码
+
+## Browser Automation
+
+Use `agent-browser` for web automation. Run `agent-browser --help` for all commands.
+
+Core workflow:
+1. `agent-browser open <url>` - Navigate to page
+2. `agent-browser snapshot -i` - Get interactive elements with refs (@e1, @e2)
+3. `agent-browser click @e1` / `fill @e2 "text"` - Interact using refs
+4. Re-snapshot after page changes
+
+
+
+
