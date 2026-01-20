@@ -164,10 +164,14 @@ class EcsLocalFileManager:
         for sub_dir in tool_config.get('directories', ['inputs', 'outputs', 'logs']):
             dirs.append(os.path.join(tool_work_dir, sub_dir))
 
+        # 默认保持原有777权限，避免容器用户写入失败
+        strict_permissions = os.getenv('ECS_STRICT_PERMISSIONS', 'false').lower() == 'true'
+        dir_mode = 0o775 if strict_permissions else 0o777
+
         for dir_path in dirs:
             os.makedirs(dir_path, exist_ok=True)
-            # 设置目录权限为777，确保容器内用户可以写入
-            os.chmod(dir_path, 0o777)
+            # 默认使用更小权限，必要时可通过ECS_ALLOW_WORLD_WRITE放开
+            os.chmod(dir_path, dir_mode)
 
     def get_tool_environment_variables(self, tool_type):
         """获取工具特定的环境变量"""

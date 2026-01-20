@@ -385,9 +385,11 @@ export const getTaskSheets = async (req: Request, res: Response) => {
       return res.status(404).json({ error: '任务未找到或无权限访问' });
     }
 
-    // 获取所有sheet信息
+    // 获取所有sheet信息（使用标准化工具类型）
+    const taskToolType = (task.parameters as any)?.toolType || 'upf';
+    const normalizedToolType = taskToolType === 'upfgen' ? 'upf' : taskToolType;
     const sheets = await prisma.sheet.findMany({
-      where: { toolType: 'upfgen' },
+      where: { toolType: normalizedToolType },
       include: {
         tables: {
           select: {

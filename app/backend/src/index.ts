@@ -30,6 +30,7 @@ import { initializeMonitoring } from './services/monitoring.service';
 import { initializeBackupService } from './services/backup.service';
 import { initializeDistributedLock } from './services/distributed-lock.service';
 import { initializeTaskStateManager } from './services/task-state-manager.service';
+import { initializeTaskStatusSyncQueueService } from './services/task-status-sync-queue.service';
 import { getResourceManager } from './services/resource-manager.service';
 // Redis连接池将在需要时动态导入
 import {
@@ -179,6 +180,7 @@ async function startServer() {
   const backupService = initializeBackupService(redis);
   const distributedLockService = initializeDistributedLock(redis);
   const taskStateManager = initializeTaskStateManager();
+  const taskStatusSyncQueueService = initializeTaskStatusSyncQueueService();
   const resourceManager = getResourceManager();
 
   // Initialize deployment mode specific services

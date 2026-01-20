@@ -10,6 +10,8 @@ import crypto from 'crypto';
 import { logToTaskFile, logErrorToTaskFile, isLoggerInitialized } from '../utils/task-logger';
 import { prisma } from '../utils/database';
 
+const isDebugLogs = process.env.DEBUG_LOGS === 'true';
+
 // 任务级别的文件操作锁
 const taskFileLocks = new Map<string, Promise<void>>();
 
@@ -1134,104 +1136,106 @@ export class ExcelThrpagesService {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.readFile(filePath);
 
-      // 清理该任务的现有数据
-      await prisma.tableData.deleteMany({ where: { taskId } });
+      await prisma.$transaction(async (tx) => {
+        // 清理该任务的现有数据
+        await tx.tableData.deleteMany({ where: { taskId } });
 
-      // 如果没有提供toolType，尝试从任务中获取
-      let detectedToolType = toolType;
-      if (!detectedToolType) {
-        const task = await prisma.task.findUnique({
-          where: { id: taskId },
-          select: { parameters: true }
-        });
-        detectedToolType = (task?.parameters as any)?.toolType || 'sdc';
-      }
-
-      console.log(`检测到工具类型: ${detectedToolType}`);
-
-      // 标准化工具类型：sdcgen -> sdc, upfgen -> upf
-      const normalizedToolType = detectedToolType === 'sdcgen' ? 'sdc' :
-                                 detectedToolType === 'upfgen' ? 'upf' :
-                                 detectedToolType;
-
-      console.log(`标准化工具类型: ${normalizedToolType}`);
-
-      // 🔥 智能选择表结构：UPF使用任务特定，SDC使用模板
-      let sheets: any[];
-
-      if (normalizedToolType === 'upf') {
-        // UPF工具：使用任务特定的表结构（包含动态电源列）
-        safeLogToTaskFile(`🔍 [EXCEL-PARSE] UPF工具：查找任务 ${taskId} 的特定表结构...`);
-        sheets = await prisma.sheet.findMany({
-          where: { toolType: normalizedToolType },
-          include: {
-            tables: {
-              where: { taskId: taskId } as any,
-              orderBy: { displayOrder: 'asc' }
-            }
-          },
-          orderBy: { displayOrder: 'asc' }
-        });
-
-        let totalTaskTables = 0;
-        sheets.forEach(sheet => {
-          const taskTables = (sheet as any).tables;
-          totalTaskTables += taskTables.length;
-        });
-
-        if (totalTaskTables === 0) {
-          throw new Error(`❌ [EXCEL-PARSE] UPF工具没有找到任务 ${taskId} 的特定表结构，请检查任务初始化是否完成`);
-        }
-        safeLogToTaskFile(`✅ [EXCEL-PARSE] UPF工具找到 ${totalTaskTables} 个任务特定表格`);
-
-        // 调试：输出存储时使用的表结构
-        sheets.forEach(sheet => {
-          safeLogToTaskFile(`   [EXCEL-PARSE] 工作表 ${sheet.sheetName}: ${sheet.tables.length} 个表格`);
-          sheet.tables.forEach((table: any) => {
-            const columns = (table.columnsSchema as any)?.columns || [];
-            safeLogToTaskFile(`     [EXCEL-PARSE] 表格 ${table.tableName}: ${columns.length} 列 [${columns.map((c: any) => c.name).join(', ')}]`);
+        // 如果没有提供toolType，尝试从任务中获取
+        let detectedToolType = toolType;
+        if (!detectedToolType) {
+          const task = await tx.task.findUnique({
+            where: { id: taskId },
+            select: { parameters: true }
           });
-        });
-      } else {
-        // SDC工具：使用模板表结构（不需要任务特定副本）
-        console.log(`🔍 [EXCEL-PARSE] SDC工具：查找模板表结构...`);
-        sheets = await prisma.sheet.findMany({
-          where: { toolType: normalizedToolType },
-          include: {
-            tables: {
-              where: { taskId: null } as any,
-              orderBy: { displayOrder: 'asc' }
-            }
-          },
-          orderBy: { displayOrder: 'asc' }
-        });
-
-        let totalTemplateTables = 0;
-        sheets.forEach(sheet => {
-          const templateTables = (sheet as any).tables;
-          totalTemplateTables += templateTables.length;
-        });
-
-        if (totalTemplateTables === 0) {
-          throw new Error(`❌ [EXCEL-PARSE] SDC工具没有找到模板表结构，请检查数据库初始化是否完成`);
-        }
-        console.log(`✅ [EXCEL-PARSE] SDC工具找到 ${totalTemplateTables} 个模板表格`);
-      }
-
-      for (const sheet of sheets) {
-        const worksheet = workbook.getWorksheet(sheet.sheetName);
-        if (!worksheet) {
-          console.warn(`工作表 ${sheet.sheetName} 不存在于Excel文件中`);
-          continue;
+          detectedToolType = (task?.parameters as any)?.toolType || 'sdc';
         }
 
-        // 获取当前sheet中所有表格名称，用于边界计算
-        const allTableNames = sheet.tables.map((table: any) => table.tableName);
+        console.log(`检测到工具类型: ${detectedToolType}`);
 
-        for (const table of sheet.tables) {
-          await this.parseTableData(worksheet, table, taskId, userId, sheet.sheetName, allTableNames, normalizedToolType);
+        // 标准化工具类型：sdcgen -> sdc, upfgen -> upf
+        const normalizedToolType = detectedToolType === 'sdcgen' ? 'sdc' :
+                                   detectedToolType === 'upfgen' ? 'upf' :
+                                   detectedToolType;
+
+        console.log(`标准化工具类型: ${normalizedToolType}`);
+
+        // 🔥 智能选择表结构：UPF使用任务特定，SDC使用模板
+        let sheets: any[];
+
+        if (normalizedToolType === 'upf') {
+          // UPF工具：使用任务特定的表结构（包含动态电源列）
+          safeLogToTaskFile(`🔍 [EXCEL-PARSE] UPF工具：查找任务 ${taskId} 的特定表结构...`);
+          sheets = await tx.sheet.findMany({
+            where: { toolType: normalizedToolType },
+            include: {
+              tables: {
+                where: { taskId: taskId } as any,
+                orderBy: { displayOrder: 'asc' }
+              }
+            },
+            orderBy: { displayOrder: 'asc' }
+          });
+
+          let totalTaskTables = 0;
+          sheets.forEach(sheet => {
+            const taskTables = (sheet as any).tables;
+            totalTaskTables += taskTables.length;
+          });
+
+          if (totalTaskTables === 0) {
+            throw new Error(`❌ [EXCEL-PARSE] UPF工具没有找到任务 ${taskId} 的特定表结构，请检查任务初始化是否完成`);
+          }
+          safeLogToTaskFile(`✅ [EXCEL-PARSE] UPF工具找到 ${totalTaskTables} 个任务特定表格`);
+
+          // 调试：输出存储时使用的表结构
+          sheets.forEach(sheet => {
+            safeLogToTaskFile(`   [EXCEL-PARSE] 工作表 ${sheet.sheetName}: ${sheet.tables.length} 个表格`);
+            sheet.tables.forEach((table: any) => {
+              const columns = (table.columnsSchema as any)?.columns || [];
+              safeLogToTaskFile(`     [EXCEL-PARSE] 表格 ${table.tableName}: ${columns.length} 列 [${columns.map((c: any) => c.name).join(', ')}]`);
+            });
+          });
+        } else {
+          // SDC工具：使用模板表结构（不需要任务特定副本）
+          console.log(`🔍 [EXCEL-PARSE] SDC工具：查找模板表结构...`);
+          sheets = await tx.sheet.findMany({
+            where: { toolType: normalizedToolType },
+            include: {
+              tables: {
+                where: { taskId: null } as any,
+                orderBy: { displayOrder: 'asc' }
+              }
+            },
+            orderBy: { displayOrder: 'asc' }
+          });
+
+          let totalTemplateTables = 0;
+          sheets.forEach(sheet => {
+            const templateTables = (sheet as any).tables;
+            totalTemplateTables += templateTables.length;
+          });
+
+          if (totalTemplateTables === 0) {
+            throw new Error(`❌ [EXCEL-PARSE] SDC工具没有找到模板表结构，请检查数据库初始化是否完成`);
+          }
+          console.log(`✅ [EXCEL-PARSE] SDC工具找到 ${totalTemplateTables} 个模板表格`);
         }
-      }
+
+        for (const sheet of sheets) {
+          const worksheet = workbook.getWorksheet(sheet.sheetName);
+          if (!worksheet) {
+            console.warn(`工作表 ${sheet.sheetName} 不存在于Excel文件中`);
+            continue;
+          }
+
+          // 获取当前sheet中所有表格名称，用于边界计算
+          const allTableNames = sheet.tables.map((table: any) => table.tableName);
+
+          for (const table of sheet.tables) {
+            await this.parseTableData(worksheet, table, taskId, userId, sheet.sheetName, allTableNames, normalizedToolType, tx);
+          }
+        }
+      });
 
       console.log(`任务 ${taskId} 的Excel文件解析完成`);
     } catch (error) {
@@ -1421,7 +1425,8 @@ export class ExcelThrpagesService {
     userId: string,
     sheetName: string,
     allTableNames: string[],
-    toolType?: string
+    toolType?: string,
+    db: typeof prisma = prisma
   ): Promise<void> {
     safeLogToTaskFile(`📊 [EXCEL-PARSER] 开始解析表格: ${table.tableName}, tableId: ${table.id}, taskId: ${table.taskId || 'null'}`);
 
@@ -1440,11 +1445,15 @@ export class ExcelThrpagesService {
     const dataStartRow = headerRow + 1;   // 数据开始行（表名称行号 + 2）
     let rowNumber = 1;
 
-    console.log(`📋 [EXCEL-PARSER] 表格结构: 表名行=${rowStart}, 列头行=${headerRow}, 数据开始行=${dataStartRow}, 数据结束行=${maxRow}`);
+    if (isDebugLogs) {
+      console.log(`📋 [EXCEL-PARSER] 表格结构: 表名行=${rowStart}, 列头行=${headerRow}, 数据开始行=${dataStartRow}, 数据结束行=${maxRow}`);
+    }
 
     // 读取数据行（从数据开始行到计算出的最大行）
     for (let dataRowIndex = dataStartRow; dataRowIndex <= maxRow; dataRowIndex++) {
-      console.log(`🔍 [EXCEL-PARSER] 处理第 ${dataRowIndex} 行 (范围: ${dataStartRow}-${maxRow})`);
+      if (isDebugLogs) {
+        console.log(`🔍 [EXCEL-PARSER] 处理第 ${dataRowIndex} 行 (范围: ${dataStartRow}-${maxRow})`);
+      }
 
       const rowData: any = {};
       const dropdownData: any = {};
@@ -1464,7 +1473,9 @@ export class ExcelThrpagesService {
         if (column.index <= maxCol) {
           try {
             // 直接使用column.index（1基索引，与Excel列号一致）
-            console.log(`🔍 [EXCEL-PARSER] 访问单元格 (${dataRowIndex}, ${column.index})`);
+            if (isDebugLogs) {
+              console.log(`🔍 [EXCEL-PARSER] 访问单元格 (${dataRowIndex}, ${column.index})`);
+            }
             const cell = worksheet.getCell(dataRowIndex, column.index);
             const cellValue = cell.value;
 
@@ -1540,7 +1551,7 @@ export class ExcelThrpagesService {
       // 保存有数据的行或有下拉数据验证的空行
       if (hasData || hasDropdownData) {
         const dataHash = this.generateDataHash(rowData);
-        await prisma.tableData.create({
+        await db.tableData.create({
           data: {
             userId,
             taskId,
@@ -2274,135 +2285,137 @@ export class ExcelThrpagesService {
       for (const sheetData of dirtySheetData) {
         console.log(`💾 [DIRTY-SAVE] 保存sheet: ${sheetData.sheetName}`);
 
-        // 获取数据库中真实的sheet和table信息
-        const dbSheet = await prisma.sheet.findFirst({
-          where: {
-            toolType: normalizedToolType,
-            sheetName: sheetData.sheetName
-          },
-          include: {
-            tables: {
-              where: normalizedToolType === 'upf'
-                ? { taskId: taskId } as any  // UPF工具：使用任务特定表结构
-                : { taskId: null } as any,   // SDC工具：使用模板表结构
-              orderBy: { displayOrder: 'asc' }
+        await prisma.$transaction(async (tx) => {
+          // 获取数据库中真实的sheet和table信息
+          const dbSheet = await tx.sheet.findFirst({
+            where: {
+              toolType: normalizedToolType,
+              sheetName: sheetData.sheetName
+            },
+            include: {
+              tables: {
+                where: normalizedToolType === 'upf'
+                  ? { taskId: taskId } as any  // UPF工具：使用任务特定表结构
+                  : { taskId: null } as any,   // SDC工具：使用模板表结构
+                orderBy: { displayOrder: 'asc' }
+              }
             }
-          }
-        });
-
-        if (!dbSheet) {
-          console.error(`❌ [DIRTY-SAVE] Sheet ${sheetData.sheetName} 未找到`);
-          continue;
-        }
-
-        console.log(`📋 [DIRTY-SAVE] 找到sheet: ${dbSheet.sheetName} (${dbSheet.id}), 包含 ${dbSheet.tables.length} 个表格`);
-        console.log(`📋 [DIRTY-SAVE] 表格列表: ${dbSheet.tables.map(t => `${t.tableName}(${t.id})`).join(', ')}`);
-
-        // 🔧 关键修复：在删除之前，先查询并保存原有的dropdownData和validationData
-        const existingDropdownData = await prisma.tableData.findMany({
-          where: {
-            taskId,
-            userId,
-            sheetId: dbSheet.id
-          },
-          select: {
-            tableId: true,
-            rowNumber: true,
-            dropdownData: true,
-            validationData: true
-          }
-        });
-
-        // 创建快速查找的Map: key="tableId_rowNumber", value={dropdownData, validationData}
-        const existingDataMap = new Map(
-          existingDropdownData.map(d => [
-            `${d.tableId}_${d.rowNumber}`,
-            { dropdownData: d.dropdownData, validationData: d.validationData }
-          ])
-        );
-
-        console.log(`🔒 [DIRTY-SAVE] 保留原有dropdownData: 共${existingDataMap.size}条记录`);
-
-        // 1. 清理该sheet的现有数据
-        await prisma.tableData.deleteMany({
-          where: {
-            taskId,
-            userId,
-            sheetId: dbSheet.id
-          }
-        });
-
-        // 2. 保存该sheet的所有表格数据
-        for (const table of sheetData.tables) {
-          // 根据tableName查找真实的tableId
-          const dbTable = dbSheet.tables.find(t => t.tableName === table.tableName);
-          if (!dbTable) {
-            console.error(`❌ [DIRTY-SAVE] Table ${table.tableName} 未找到在sheet ${sheetData.sheetName}`);
-            continue;
-          }
-          const dataToInsert = table.data.map((rowData, index) => {
-            // 处理前端发送的嵌套数据结构
-            const actualRowData = rowData.row_data || rowData;
-            const rowNumber = index + 1;
-            const mapKey = `${dbTable.id}_${rowNumber}`;
-
-            // 🔧 关键修复：优先使用前端发送的值，如果没有则使用原有的
-            let dropdownData = rowData.dropdown_data;
-            let validationData = rowData.validation_data;
-
-            // 如果前端没发送dropdownData，从原有数据中保留
-            if (!dropdownData && existingDataMap.has(mapKey)) {
-              dropdownData = existingDataMap.get(mapKey)!.dropdownData;
-              console.log(`🔒 [DIRTY-SAVE] 保留原有dropdownData: table=${dbTable.tableName}, row=${rowNumber}`);
-            }
-
-            // 如果前端没发送validationData，从原有数据中保留
-            if (!validationData && existingDataMap.has(mapKey)) {
-              validationData = existingDataMap.get(mapKey)!.validationData;
-            }
-
-            // 确保所有字段都存在，即使为空字符串
-            const completeRowData: any = {};
-
-            // 从数据库表结构中获取列信息
-            const columnsSchema = (dbTable.columnsSchema as any)?.columns || [];
-            if (columnsSchema.length > 0) {
-              // 初始化所有字段为空字符串
-              columnsSchema.forEach((column: any) => {
-                const columnName = column.name || column;
-                completeRowData[columnName] = actualRowData[columnName] || '';
-              });
-            } else {
-              // 如果没有columns定义，使用actualRowData
-              Object.assign(completeRowData, actualRowData);
-            }
-
-            const dataHash = this.generateDataHash(completeRowData);
-            return {
-              userId,
-              taskId,
-              tableId: dbTable.id, // 使用数据库中真实的tableId
-              sheetId: dbSheet.id, // 使用数据库中真实的sheetId
-              rowNumber: index + 1,
-              rowData: {
-                ...completeRowData,
-                _dataHash: dataHash,
-                _sourceType: 'web',
-                _lastModified: new Date().toISOString()
-              },
-              dropdownData,
-              validationData
-            };
           });
 
-          if (dataToInsert.length > 0) {
-            await prisma.tableData.createMany({
-              data: dataToInsert
-            });
+          if (!dbSheet) {
+            console.error(`❌ [DIRTY-SAVE] Sheet ${sheetData.sheetName} 未找到`);
+            return;
           }
 
-          console.log(`✅ [DIRTY-SAVE] 表格 ${table.tableName} 保存完成，共 ${dataToInsert.length} 行，tableId: ${dbTable.id}`);
-        }
+          console.log(`📋 [DIRTY-SAVE] 找到sheet: ${dbSheet.sheetName} (${dbSheet.id}), 包含 ${dbSheet.tables.length} 个表格`);
+          console.log(`📋 [DIRTY-SAVE] 表格列表: ${dbSheet.tables.map(t => `${t.tableName}(${t.id})`).join(', ')}`);
+
+          // 🔧 关键修复：在删除之前，先查询并保存原有的dropdownData和validationData
+          const existingDropdownData = await tx.tableData.findMany({
+            where: {
+              taskId,
+              userId,
+              sheetId: dbSheet.id
+            },
+            select: {
+              tableId: true,
+              rowNumber: true,
+              dropdownData: true,
+              validationData: true
+            }
+          });
+
+          // 创建快速查找的Map: key="tableId_rowNumber", value={dropdownData, validationData}
+          const existingDataMap = new Map(
+            existingDropdownData.map(d => [
+              `${d.tableId}_${d.rowNumber}`,
+              { dropdownData: d.dropdownData, validationData: d.validationData }
+            ])
+          );
+
+          console.log(`🔒 [DIRTY-SAVE] 保留原有dropdownData: 共${existingDataMap.size}条记录`);
+
+          // 1. 清理该sheet的现有数据
+          await tx.tableData.deleteMany({
+            where: {
+              taskId,
+              userId,
+              sheetId: dbSheet.id
+            }
+          });
+
+          // 2. 保存该sheet的所有表格数据
+          for (const table of sheetData.tables) {
+            // 根据tableName查找真实的tableId
+            const dbTable = dbSheet.tables.find(t => t.tableName === table.tableName);
+            if (!dbTable) {
+              console.error(`❌ [DIRTY-SAVE] Table ${table.tableName} 未找到在sheet ${sheetData.sheetName}`);
+              continue;
+            }
+            const dataToInsert = table.data.map((rowData, index) => {
+              // 处理前端发送的嵌套数据结构
+              const actualRowData = rowData.row_data || rowData;
+              const rowNumber = index + 1;
+              const mapKey = `${dbTable.id}_${rowNumber}`;
+
+              // 🔧 关键修复：优先使用前端发送的值，如果没有则使用原有的
+              let dropdownData = rowData.dropdown_data;
+              let validationData = rowData.validation_data;
+
+              // 如果前端没发送dropdownData，从原有数据中保留
+              if (!dropdownData && existingDataMap.has(mapKey)) {
+                dropdownData = existingDataMap.get(mapKey)!.dropdownData;
+                console.log(`🔒 [DIRTY-SAVE] 保留原有dropdownData: table=${dbTable.tableName}, row=${rowNumber}`);
+              }
+
+              // 如果前端没发送validationData，从原有数据中保留
+              if (!validationData && existingDataMap.has(mapKey)) {
+                validationData = existingDataMap.get(mapKey)!.validationData;
+              }
+
+              // 确保所有字段都存在，即使为空字符串
+              const completeRowData: any = {};
+
+              // 从数据库表结构中获取列信息
+              const columnsSchema = (dbTable.columnsSchema as any)?.columns || [];
+              if (columnsSchema.length > 0) {
+                // 初始化所有字段为空字符串
+                columnsSchema.forEach((column: any) => {
+                  const columnName = column.name || column;
+                  completeRowData[columnName] = actualRowData[columnName] || '';
+                });
+              } else {
+                // 如果没有columns定义，使用actualRowData
+                Object.assign(completeRowData, actualRowData);
+              }
+
+              const dataHash = this.generateDataHash(completeRowData);
+              return {
+                userId,
+                taskId,
+                tableId: dbTable.id, // 使用数据库中真实的tableId
+                sheetId: dbSheet.id, // 使用数据库中真实的sheetId
+                rowNumber: index + 1,
+                rowData: {
+                  ...completeRowData,
+                  _dataHash: dataHash,
+                  _sourceType: 'web',
+                  _lastModified: new Date().toISOString()
+                },
+                dropdownData,
+                validationData
+              };
+            });
+
+            if (dataToInsert.length > 0) {
+              await tx.tableData.createMany({
+                data: dataToInsert
+              });
+            }
+
+            console.log(`✅ [DIRTY-SAVE] 表格 ${table.tableName} 保存完成，共 ${dataToInsert.length} 行，tableId: ${dbTable.id}`);
+          }
+        });
 
         // 3. 验证保存后的数据一致性
         const validation = await this.validateDatabaseWebConsistency(
@@ -3787,47 +3800,51 @@ export class ExcelThrpagesService {
                                  detectedToolType === 'upfgen' ? 'upf' :
                                  detectedToolType;
 
-      // 获取sheet和table信息
-      const sheet = await prisma.sheet.findFirst({
-        where: { toolType: normalizedToolType, sheetName },
-        include: { tables: true }
-      });
+      await prisma.$transaction(async (tx) => {
+        // 获取sheet和table信息
+        const sheet = await tx.sheet.findFirst({
+          where: { toolType: normalizedToolType, sheetName },
+          include: { tables: true }
+        });
 
-      if (!sheet) {
-        throw new Error(`Sheet ${sheetName} not found`);
-      }
+        if (!sheet) {
+          throw new Error(`Sheet ${sheetName} not found`);
+        }
 
-      // 删除该sheet下该任务的现有数据
-      await prisma.tableData.deleteMany({
-        where: {
-          taskId,
-          sheetId: sheet.id
+        // 删除该sheet下该任务的现有数据
+        await tx.tableData.deleteMany({
+          where: {
+            taskId,
+            sheetId: sheet.id
+          }
+        });
+
+        // 保存新数据（批量写入）
+        for (const tableData of tablesData) {
+          const table = sheet.tables.find(t => t.tableName === tableData.table_name);
+          if (!table) {
+            console.warn(`Table ${tableData.table_name} not found in sheet ${sheetName}`);
+            continue;
+          }
+
+          const dataToInsert = tableData.rows.map((row: any, index: number) => ({
+            userId,
+            taskId,
+            tableId: table.id,
+            sheetId: sheet.id,
+            rowNumber: index + 1,
+            rowData: row.row_data || row,
+            dropdownData: row.dropdown_data || null,
+            validationData: row.validation_data || null
+          }));
+
+          if (dataToInsert.length > 0) {
+            await tx.tableData.createMany({
+              data: dataToInsert
+            });
+          }
         }
       });
-
-      // 保存新数据
-      for (const tableData of tablesData) {
-        const table = sheet.tables.find(t => t.tableName === tableData.table_name);
-        if (!table) {
-          console.warn(`Table ${tableData.table_name} not found in sheet ${sheetName}`);
-          continue;
-        }
-
-        for (const [index, row] of tableData.rows.entries()) {
-          await prisma.tableData.create({
-            data: {
-              userId,
-              taskId,
-              tableId: table.id,
-              sheetId: sheet.id,
-              rowNumber: index + 1,
-              rowData: row.row_data || row,
-              dropdownData: row.dropdown_data || null,
-              validationData: row.validation_data || null
-            }
-          });
-        }
-      }
 
       console.log(`任务 ${taskId} 的 ${sheetName} sheet数据保存完成`);
     } catch (error) {

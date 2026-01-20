@@ -40,5 +40,26 @@ export const cancelSubscription = async (userId: string) => {
  * @param userId - The ID of the user.
  */
 export const createSubscription = async (userId: string) => {
-  // Implementation of createSubscription function
+  // 默认创建Free订阅（与注册逻辑保持一致）
+  const freePlan = await prisma.plan.findFirst({
+    where: { name: 'Free' }
+  });
+
+  if (!freePlan) {
+    throw new Error('Free plan not found.');
+  }
+
+  // Free用户订阅永久有效（10年后过期）
+  const endDate = new Date();
+  endDate.setFullYear(endDate.getFullYear() + 10);
+
+  return prisma.subscription.create({
+    data: {
+      userId,
+      planId: freePlan.id,
+      status: 'ACTIVE',
+      startDate: new Date(),
+      endDate
+    }
+  });
 }; 

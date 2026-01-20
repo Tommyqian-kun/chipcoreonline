@@ -231,10 +231,11 @@ def process_temp_files(task, task_logger, file_manager):
                         task_logger.log('INFO', 'FILES', f'Copying {filename} to work json directory: {work_json_file_path}')
                         shutil.copy2(temp_file_path, work_json_file_path)
 
-                        # 设置JSON文件权限为666，确保容器内的sdcuser(uid=999)可以覆盖
-                        # 在Linux/WSL2下，文件权限严格控制，容器用户无法写入644权限的文件
-                        os.chmod(work_json_file_path, 0o666)
-                        task_logger.log('INFO', 'FILES', f'Set permissions 666 for {filename} (container user can overwrite)')
+                        # 默认保持原有666权限，避免容器用户写入失败
+                        strict_permissions = os.getenv('ECS_STRICT_PERMISSIONS', 'false').lower() == 'true'
+                        file_mode = 0o664 if strict_permissions else 0o666
+                        os.chmod(work_json_file_path, file_mode)
+                        task_logger.log('INFO', 'FILES', f'Set permissions {oct(file_mode)} for {filename}')
 
                         # 验证work json目录复制结果
                         if os.path.exists(work_json_file_path):
@@ -398,7 +399,10 @@ def cleanup_temp_files(task_id, task_logger, cleanup_reason="unknown", retry_cou
                     task = session.query(Task).filter_by(id=task_id).first()
                     if task and task.finishedAt:
                         from datetime import datetime, timezone
-                        time_since_completion = datetime.now(timezone.utc) - task.finishedAt
+                        finished_at = task.finishedAt
+                        if finished_at.tzinfo is None:
+                            finished_at = finished_at.replace(tzinfo=timezone.utc)
+                        time_since_completion = datetime.now(timezone.utc) - finished_at
                         if time_since_completion.total_seconds() > 2 * 60:  # 2分钟
                             should_cleanup = True
                             cleanup_detail = f"Task completed with output files, 2-minute download period expired"
