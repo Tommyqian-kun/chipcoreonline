@@ -8,6 +8,7 @@
 
 | 版本号 | 提交信息 | 提交日期 |
 |--------|----------|----------|
+| 86adb52 | fix: ecs-only multipage risk fixes and stability (版本13) | 2026-01-20 |
 | 6059d4e | fix: 修复并发槽位泄露风险并增强系统可靠性 (版本12) | 2026-01-11 |
 | 41b5682 | fix: 修复P0和P1级别安全漏洞及Redis架构问题 (版本11) | 2026-01-07 |
 | 058d5b5 | feat: 引入完整测试框架并修复关键bug (版本10) | 2026-01-06 |
@@ -24,6 +25,93 @@
 ---
 
 ## 版本详情
+
+### 版本 13: 86adb52
+
+**提交信息**: fix: ecs-only multipage risk fixes and stability
+
+**提交日期**: 2026-01-20
+
+**作者**: GPT-5.2 Codex <noreply@openai.com>
+
+#### 版本概述
+
+本次版本聚焦 ECS Only 多页面交互（SDC/UPF）风险修复与稳定性增强，在不改变业务流程的前提下完善队列可靠性、Worker 线程安全、下载一致性、数据事务一致性与状态补偿链路。
+
+#### 核心修复
+
+##### 1. Worker 会话线程安全与完成状态一致性
+- 线程内创建 SQLAlchemy Session，避免跨线程复用
+- 完成/失败状态补写避免覆盖 EXECUTION_TIMEOUT
+- ECS Only `finishedAt/startedAt` 写入统一为 UTC naive，避免下载窗口偏移
+
+**修改文件**:
+- `app/backend/src/workers/toolsRefractor/ecs_only_processor.py`
+
+##### 2. 队列可靠性与回补幂等保护
+- `BRPOPLPUSH` 处理队列 + processing 队列回补
+- 回补前 DB 状态校验，仅在 `PENDING/RUNNING` 时回补
+
+**修改文件**:
+- `app/backend/src/workers/toolWorker.py`
+
+##### 3. 状态补偿与恢复链路
+- Worker API 重试失败后写入补偿队列
+- 后端定时补偿服务消费队列并更新任务状态
+- 兼容 `finishedAt` 字符串，避免补偿消费失败
+
+**修改文件**:
+- `app/backend/src/workers/toolsRefractor/api_client.py`
+- `app/backend/src/services/task-status-sync-queue.service.ts`
+- `app/backend/src/index.ts`
+
+##### 4. 多页面数据一致性与事务保护
+- Excel 解析、保存与脏数据写入改为事务化
+- 支持批量写入，减少中间异常导致的数据丢失
+- 调试日志可通过 `DEBUG_LOGS` 控制
+
+**修改文件**:
+- `app/backend/src/services/excel_thrpages.service.ts`
+
+##### 5. UPF toolType 统一读取
+- `getTaskSheets` 标准化 toolType（`upfgen -> upf`）
+
+**修改文件**:
+- `app/backend/src/controllers/upf_thrpages.controller.ts`
+
+##### 6. 任务超时与草稿清理
+- 新增 DRAFT 超时清理（默认 24h），清理 temp/logs
+- 保持 jobs 清理策略不变
+
+**修改文件**:
+- `app/backend/src/services/task-timeout.service.ts`
+- `app/backend/src/config/env-validation.ts`
+
+##### 7. ECS Only 权限与环境变量校验
+- 增加 `ECS_STRICT_PERMISSIONS` 开关，默认保持原有 777/666
+- 支付/OSS/阿里云配置按部署模式与支付开关条件校验
+
+**修改文件**:
+- `app/backend/src/workers/toolsRefractor/file_manager.py`
+- `app/backend/src/workers/toolsRefractor/utils.py`
+- `app/backend/src/config/env-validation.ts`
+
+##### 8. 订阅默认创建补全
+- 补全 `createSubscription`，创建 Free 订阅
+
+**修改文件**:
+- `app/backend/src/services/subscription.service.ts`
+
+#### 文档更新
+- `docs/ecsonly_multipage_risk_improve_gpt52.md`
+- `docs/ecsonly_multipage_risk_solution_gpt52_0120.md`
+
+#### 修改统计
+- 14 个文件修改
+- 2 个新增文件
+- 1196 行新增 / 382 行删除
+
+---
 
 ### 版本 12: 6059d4e
 

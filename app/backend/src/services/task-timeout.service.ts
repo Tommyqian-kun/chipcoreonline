@@ -11,6 +11,7 @@ export class TaskTimeoutService {
   private static readonly QUEUE_WAIT_TIMEOUT_MINUTES = parseInt(process.env.QUEUE_WAIT_TIMEOUT_MINUTES || '35');
   private static readonly CONTAINER_EXECUTION_TIMEOUT_MINUTES = parseInt(process.env.CONTAINER_EXECUTION_TIMEOUT_MINUTES || '3');
   private static readonly CLEANUP_INTERVAL_MINUTES = parseInt(process.env.CLEANUP_INTERVAL_MINUTES || '60');
+  private static readonly DRAFT_TASK_TIMEOUT_HOURS = parseInt(process.env.DRAFT_TASK_TIMEOUT_HOURS || '24');
   private static timeoutInterval: NodeJS.Timeout | null = null;
 
   /**
@@ -59,6 +60,9 @@ export class TaskTimeoutService {
 
       // 2. 检查容器执行超时的任务
       await this.checkContainerExecutionTimeouts();
+
+      // 3. 检查DRAFT超时任务（多页面交互未提交的草稿）
+      await this.checkDraftTimeouts();
 
     } catch (error) {
       logger.error({
@@ -152,6 +156,46 @@ export class TaskTimeoutService {
       logger.error({
         error: error instanceof Error ? error.message : 'Unknown error'
       }, 'Failed to check execution timeout tasks');
+    }
+  }
+
+  /**
+   * 检查DRAFT超时任务（多页面交互草稿）
+   */
+  private static async checkDraftTimeouts(): Promise<void> {
+    const draftTimeoutThreshold = new Date();
+    draftTimeoutThreshold.setHours(draftTimeoutThreshold.getHours() - this.DRAFT_TASK_TIMEOUT_HOURS);
+
+    try {
+      const draftTimeoutTasks = await prisma.task.findMany({
+        where: {
+          status: 'DRAFT',
+          updatedAt: {
+            lt: draftTimeoutThreshold
+          }
+        },
+        select: {
+          id: true,
+          userId: true,
+          updatedAt: true,
+          parameters: true
+        }
+      });
+
+      if (draftTimeoutTasks.length > 0) {
+        logger.warn({
+          draftTimeoutTasksCount: draftTimeoutTasks.length,
+          draftTimeoutThreshold: draftTimeoutThreshold.toISOString()
+        }, 'Found draft timeout tasks');
+
+        for (const task of draftTimeoutTasks) {
+          await this.handleDraftTimeoutTask(task);
+        }
+      }
+    } catch (error) {
+      logger.error({
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }, 'Failed to check draft timeout tasks');
     }
   }
 
@@ -273,6 +317,62 @@ export class TaskTimeoutService {
         taskId,
         error: error instanceof Error ? error.message : 'Unknown error'
       }, 'Failed to handle execution timeout task');
+    }
+  }
+
+  /**
+   * 处理DRAFT超时任务
+   */
+  private static async handleDraftTimeoutTask(task: {
+    id: string;
+    userId: string;
+    updatedAt: Date | null;
+    parameters: any;
+  }): Promise<void> {
+    const taskId = task.id;
+    const updatedAt = task.updatedAt || new Date();
+    const draftAgeHours = Math.round((Date.now() - updatedAt.getTime()) / (1000 * 60 * 60));
+
+    logger.warn({
+      taskId,
+      userId: task.userId,
+      draftAgeHours
+    }, 'Handling draft timeout task');
+
+    try {
+      // 标准化工具类型用于清理
+      const rawToolType = task.parameters?.toolType || 'sdc';
+      const normalizedToolType = rawToolType === 'sdcgen' ? 'sdc' :
+                                 rawToolType === 'upfgen' ? 'upf' :
+                                 rawToolType;
+
+      // 1. 标记任务为取消（保留记录）
+      await prisma.task.update({
+        where: { id: taskId },
+        data: {
+          status: 'CANCELLED',
+          finishedAt: new Date(),
+          errorMessage: `Draft task expired after ${draftAgeHours} hours without submission`
+        }
+      });
+
+      // 2. 清理temp/logs及Excel数据（不触碰jobs目录）
+      await (await import('./cleanup.service')).CleanupService.cleanupFailedTask(
+        taskId,
+        normalizedToolType === 'upf' ? 'upf' : 'sdc',
+        'temp_logs'
+      );
+
+      logger.info({
+        taskId,
+        userId: task.userId,
+        draftAgeHours
+      }, 'Draft task cleaned up after timeout');
+    } catch (error) {
+      logger.error({
+        taskId,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }, 'Failed to handle draft timeout task');
     }
   }
 

@@ -1,9 +1,14 @@
 import os
 import time
+import json
 import logging
 import functools
 import requests
 from datetime import datetime, timezone
+from .core import redis_client
+
+STATUS_SYNC_PENDING_SET = 'task_status_sync_pending'
+STATUS_SYNC_PAYLOAD_HASH = 'task_status_sync_payload'
 
 def retry_on_network_error(max_retries=3, base_delay=1.0):
     """
@@ -115,8 +120,29 @@ def _update_task_status_via_api_internal(task_id, status, additional_data=None):
         # 对于非200状态码，抛出异常以触发重试
         raise requests.exceptions.HTTPError(f"API returned status {response.status_code}: {response.text}")
 
+def _enqueue_status_sync(task_id, status, additional_data=None):
+    """API更新失败时，将任务状态写入Redis等待后端补偿推送"""
+    try:
+        payload = {'status': status}
+        if additional_data:
+            payload.update(additional_data)
+        redis_client.sadd(STATUS_SYNC_PENDING_SET, task_id)
+        redis_client.hset(STATUS_SYNC_PAYLOAD_HASH, task_id, json.dumps(payload))
+        logging.warning(f"Queued task status sync for {task_id} (status={status})")
+    except Exception as e:
+        logging.error(f"Failed to enqueue task status sync for {task_id}: {str(e)}")
+
 # 应用重试装饰器创建带重试的API调用函数
-update_task_status_via_api_with_retry = retry_on_network_error(max_retries=3, base_delay=1.0)(_update_task_status_via_api_internal)
+_update_task_status_via_api_with_retry = retry_on_network_error(max_retries=3, base_delay=1.0)(_update_task_status_via_api_internal)
+
+def update_task_status_via_api_with_retry(task_id, status, additional_data=None):
+    """带重试的API更新，失败时写入补偿队列"""
+    try:
+        return _update_task_status_via_api_with_retry(task_id, status, additional_data)
+    except Exception as e:
+        logging.error(f"Failed to update task {task_id} status via API after retries: {str(e)}")
+        _enqueue_status_sync(task_id, status, additional_data)
+        raise
 
 __all__ = [
     'retry_on_network_error',

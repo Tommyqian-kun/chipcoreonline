@@ -30,44 +30,21 @@ from container_manager import container_manager, cleanup_container_for_task
 # --- Main Worker Logic ---
 def process_task(task_id):
     """处理单个任务 - 支持双部署模式，包含完善的错误处理和资源清理"""
-    session = Session()
     task = None
-    task_logger = None
     cleanup_manager = ResourceCleanupManager()
+    task_logger = None
 
     try:
         logging.info(f"Processing task: {task_id}")
-        task = session.query(Task).filter_by(id=task_id).first()
-        if not task:
-            logging.error(f"Task {task_id} not found in DB.")
-            return
-
-        # 初始化任务日志记录器
-        task_logger = TaskLogger(task_id, task.userId)
-        task_logger.log_database_operation('SELECT', 'Task', True, {'taskId': task_id})
-        task_logger.log('INFO', 'TASK', f'Starting task processing', {
-            'toolId': task.toolId,
-            'status': task.status,
-            'parameters': task.parameters,
-            'deploymentMode': task.deploymentMode or get_deployment_mode()
-        })
-
-        # 注意：此时还不创建jobs目录，等到容器真正启动后再创建
-        # 更新任务状态为运行中
-        task.status = 'RUNNING'
-        task.startedAt = datetime.now(timezone.utc)
-        session.commit()
-
-        # 通过API发送RUNNING状态通知给前端（使用带重试的版本）
+        # 主线程仅用于快速校验任务存在，避免跨线程共享Session
+        session = Session()
         try:
-            update_task_status_via_api_with_retry(task_id, 'RUNNING', {
-                'startedAt': task.startedAt.isoformat(),
-                'progress': 10,
-                'currentStep': 'STARTING_EXECUTION'
-            })
-            logging.info(f"Sent RUNNING status notification for task {task_id}")
-        except Exception as api_error:
-            logging.error(f"Failed to send RUNNING status notification: {api_error}")
+            task = session.query(Task).filter_by(id=task_id).first()
+            if not task:
+                logging.error(f"Task {task_id} not found in DB.")
+                return
+        finally:
+            session.close()
 
         # 设置任务超时时间（默认30分钟）
         timeout_seconds = int(os.getenv('TASK_TIMEOUT_SECONDS', 1800))
@@ -81,12 +58,50 @@ def process_task(task_id):
         deployment_mode = task.deploymentMode or get_deployment_mode()
 
         def task_execution():
-            if deployment_mode == 'ecs_only':
-                return process_task_ecs_only(task, task_logger, session)
-            else:
-                # 延迟导入避免循环依赖
-                from .ecs_oss_acr_processor import process_task_ecs_oss_acr
-                return process_task_ecs_oss_acr(task, task_logger, session)
+            # 线程内创建独立Session，避免跨线程复用
+            session = Session()
+            try:
+                task = session.query(Task).filter_by(id=task_id).first()
+                if not task:
+                    logging.error(f"Task {task_id} not found in DB (thread).")
+                    return False
+
+                # 初始化任务日志记录器（线程内）
+                task_logger = TaskLogger(task_id, task.userId)
+                task_logger.log_database_operation('SELECT', 'Task', True, {'taskId': task_id})
+                task_logger.log('INFO', 'TASK', f'Starting task processing', {
+                    'toolId': task.toolId,
+                    'status': task.status,
+                    'parameters': task.parameters,
+                    'deploymentMode': task.deploymentMode or get_deployment_mode()
+                })
+
+                # 注意：此时还不创建jobs目录，等到容器真正启动后再创建
+                # 更新任务状态为运行中
+                task.status = 'RUNNING'
+                # Use naive UTC to avoid timezone offset when storing in DB
+                task.startedAt = datetime.utcnow()
+                session.commit()
+
+                # 通过API发送RUNNING状态通知给前端（使用带重试的版本）
+                try:
+                    update_task_status_via_api_with_retry(task_id, 'RUNNING', {
+                        'startedAt': task.startedAt.isoformat(),
+                        'progress': 10,
+                        'currentStep': 'STARTING_EXECUTION'
+                    })
+                    logging.info(f"Sent RUNNING status notification for task {task_id}")
+                except Exception as api_error:
+                    logging.error(f"Failed to send RUNNING status notification: {api_error}")
+
+                if deployment_mode == 'ecs_only':
+                    return process_task_ecs_only(task, task_logger, session)
+                else:
+                    # 延迟导入避免循环依赖
+                    from .ecs_oss_acr_processor import process_task_ecs_oss_acr
+                    return process_task_ecs_oss_acr(task, task_logger, session)
+            finally:
+                session.close()
 
         # 使用超时和清理机制执行任务
         success = execute_with_timeout_and_cleanup(
@@ -95,87 +110,109 @@ def process_task(task_id):
             cleanup_manager
         )
 
-        if success:
-            task.status = 'COMPLETED'
-            task.finishedAt = datetime.now(timezone.utc)
-            logging.info(f"Task {task_id} completed successfully")
-            # 通过API更新状态，确保前端能收到状态更新，包含完整的进度信息（使用带重试的版本）
-            try:
-                update_task_status_via_api_with_retry(task_id, 'COMPLETED', {
-                    'finishedAt': task.finishedAt.isoformat(),
-                    'progress': 100,
-                    'currentStep': 'COMPLETED'
-                })
-            except Exception as api_error:
-                logging.error(f"Failed to update task status via API: {api_error}")
-        else:
-            task.status = 'FAILED'
-            task.finishedAt = datetime.now(timezone.utc)
-            # 保留currentStep和progress，显示失败时的实际执行进度
-            logging.error(f"Task {task_id} failed")
-            # 通过API更新状态，确保前端能收到状态更新（使用带重试的版本）
-            try:
-                update_task_status_via_api_with_retry(task_id, 'FAILED', {
-                    'finishedAt': task.finishedAt.isoformat(),
-                    'errorMessage': 'Task execution failed',
-                    'currentStep': task.currentStep,  # 保留失败时的执行步骤
-                    'progress': task.progress  # 保留失败时的进度
-                })
-            except Exception as api_error:
-                logging.error(f"Failed to update task status via API: {api_error}")
+        # 主线程使用独立Session进行最终状态补写（避免跨线程Session）
+        session = Session()
+        try:
+            task = session.query(Task).filter_by(id=task_id).first()
+            if not task:
+                logging.error(f"Task {task_id} not found in DB after execution.")
+                return
+
+            if success:
+                # 仅在仍处于RUNNING时补写为COMPLETED，避免覆盖EXECUTION_TIMEOUT等状态
+                if task.status == 'RUNNING':
+                    task.status = 'COMPLETED'
+                    # Use naive UTC to avoid timezone offset when storing in DB
+                    task.finishedAt = datetime.utcnow()
+                logging.info(f"Task {task_id} completed successfully")
+                # 通过API更新状态，确保前端能收到状态更新，包含完整的进度信息（使用带重试的版本）
+                try:
+                    finished_at_value = datetime.now(timezone.utc).isoformat()
+                    update_task_status_via_api_with_retry(task_id, 'COMPLETED', {
+                        'finishedAt': finished_at_value,
+                        'progress': 100,
+                        'currentStep': 'COMPLETED'
+                    })
+                except Exception as api_error:
+                    logging.error(f"Failed to update task status via API: {api_error}")
+            else:
+                if task.status == 'RUNNING':
+                    task.status = 'FAILED'
+                    # Use naive UTC to avoid timezone offset when storing in DB
+                    task.finishedAt = datetime.utcnow()
+                # 保留currentStep和progress，显示失败时的实际执行进度
+                logging.error(f"Task {task_id} failed")
+                # 通过API更新状态，确保前端能收到状态更新（使用带重试的版本）
+                try:
+                    finished_at_value = datetime.now(timezone.utc).isoformat()
+                    update_task_status_via_api_with_retry(task_id, 'FAILED', {
+                        'finishedAt': finished_at_value,
+                        'errorMessage': 'Task execution failed',
+                        'currentStep': task.currentStep,  # 保留失败时的执行步骤
+                        'progress': task.progress  # 保留失败时的进度
+                    })
+                except Exception as api_error:
+                    logging.error(f"Failed to update task status via API: {api_error}")
+            session.commit()
+        finally:
+            session.close()
 
     except TaskTimeoutError as e:
         error_msg = f"Task timed out: {str(e)}"
         logging.error(f"Task {task_id} timed out: {str(e)}")
-        if task:
-            task.status = 'FAILED'
-            task.errorMessage = error_msg
-            task.finishedAt = datetime.now(timezone.utc)
-            # 保留currentStep和progress，显示超时时的实际执行进度
-            # 通过API更新数据库状态，确保前端能收到状态更新（使用带重试的版本）
-            try:
-                update_task_status_via_api_with_retry(task_id, 'FAILED', {
-                    'errorMessage': error_msg,
-                    'finishedAt': task.finishedAt.isoformat(),
-                    'currentStep': task.currentStep,  # 保留超时时的执行步骤
-                    'progress': task.progress  # 保留超时时的进度
-                })
-            except Exception as api_error:
-                logging.error(f"Failed to update task status via API: {api_error}")
+        session = Session()
+        try:
+            task = session.query(Task).filter_by(id=task_id).first()
+            if task:
+                task.status = 'FAILED'
+                task.errorMessage = error_msg
+                # Use naive UTC to avoid timezone offset when storing in DB
+                task.finishedAt = datetime.utcnow()
+                session.commit()
+                # 保留currentStep和progress，显示超时时的实际执行进度
+                # 通过API更新数据库状态，确保前端能收到状态更新（使用带重试的版本）
+                try:
+                    update_task_status_via_api_with_retry(task_id, 'FAILED', {
+                        'errorMessage': error_msg,
+                        'finishedAt': datetime.now(timezone.utc).isoformat(),
+                        'currentStep': task.currentStep,  # 保留超时时的执行步骤
+                        'progress': task.progress  # 保留超时时的进度
+                    })
+                except Exception as api_error:
+                    logging.error(f"Failed to update task status via API: {api_error}")
+        finally:
+            session.close()
     except Exception as e:
         error_msg = str(e)
         logging.error(f"Error processing task {task_id}: {error_msg}", exc_info=True)
-        if task:
-            task.status = 'FAILED'
-            task.errorMessage = error_msg
-            task.finishedAt = datetime.now(timezone.utc)
-            # 保留currentStep和progress，显示异常时的实际执行进度
-            # 通过API更新数据库状态，确保前端能收到状态更新（使用带重试的版本）
-            try:
-                update_task_status_via_api_with_retry(task_id, 'FAILED', {
-                    'errorMessage': error_msg,
-                    'finishedAt': task.finishedAt.isoformat(),
-                    'currentStep': task.currentStep,  # 保留异常时的执行步骤
-                    'progress': task.progress  # 保留异常时的进度
-                })
-            except Exception as api_error:
-                logging.error(f"Failed to update task status via API: {api_error}")
-    finally:
-        # 确保数据库会话关闭和状态更新
+        session = Session()
         try:
-            if task and session:
+            task = session.query(Task).filter_by(id=task_id).first()
+            if task:
+                task.status = 'FAILED'
+                task.errorMessage = error_msg
+                # Use naive UTC to avoid timezone offset when storing in DB
+                task.finishedAt = datetime.utcnow()
                 session.commit()
-        except Exception as db_error:
-            logging.error(f"Database commit failed for task {task_id}: {db_error}")
+                # 保留currentStep和progress，显示异常时的实际执行进度
+                # 通过API更新数据库状态，确保前端能收到状态更新（使用带重试的版本）
+                try:
+                    update_task_status_via_api_with_retry(task_id, 'FAILED', {
+                        'errorMessage': error_msg,
+                        'finishedAt': datetime.now(timezone.utc).isoformat(),
+                        'currentStep': task.currentStep,  # 保留异常时的执行步骤
+                        'progress': task.progress  # 保留异常时的进度
+                    })
+                except Exception as api_error:
+                    logging.error(f"Failed to update task status via API: {api_error}")
         finally:
-            if session:
-                session.close()
-
-            # 执行清理任务
-            try:
-                cleanup_manager.execute_cleanup()
-            except Exception as cleanup_error:
-                logging.error(f"Final cleanup failed for task {task_id}: {cleanup_error}")
+            session.close()
+    finally:
+        # 执行清理任务
+        try:
+            cleanup_manager.execute_cleanup()
+        except Exception as cleanup_error:
+            logging.error(f"Final cleanup failed for task {task_id}: {cleanup_error}")
 
 def process_task_ecs_only(task, task_logger, session):
     """ECS Only模式任务处理 - 延迟目录创建版本"""
@@ -582,7 +619,8 @@ def process_task_ecs_only(task, task_logger, session):
             task = session.query(Task).filter(Task.id == task.id).first()
             if task:
                 task.status = 'EXECUTION_TIMEOUT'
-                task.finishedAt = datetime.now(timezone.utc)
+                # Use naive UTC to avoid timezone offset when storing in DB
+                task.finishedAt = datetime.utcnow()
                 task.errorMessage = f"Container execution timeout after {execution_time:.0f} seconds (limit {container_timeout_seconds} seconds)"
                 session.commit()
                 session.flush()
@@ -732,7 +770,7 @@ def process_task_ecs_only(task, task_logger, session):
                 # 通过API发送任务完成通知（使用带重试的版本）
                 # 注意：不再传递downloadTimeRemaining，后端API会基于finishedAt动态计算
                 try:
-                    finished_at_value = task.finishedAt.isoformat() if task.finishedAt else datetime.now(timezone.utc).isoformat()
+                    finished_at_value = datetime.now(timezone.utc).isoformat()
                     update_task_status_via_api_with_retry(task.id, 'COMPLETED', {
                         'outputFile': result_zip,
                         'downloadStatus': 'AVAILABLE',
@@ -754,7 +792,8 @@ def process_task_ecs_only(task, task_logger, session):
             task = session.query(Task).filter(Task.id == task.id).first()
             if task:
                 task.status = 'FAILED'
-                task.finishedAt = datetime.now(timezone.utc)
+                # Use naive UTC to avoid timezone offset when storing in DB
+                task.finishedAt = datetime.utcnow()
                 task.errorMessage = f"Container execution failed with exit code {exit_code}"
                 session.commit()
                 session.flush()

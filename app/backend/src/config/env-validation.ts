@@ -21,30 +21,31 @@ const envSchema = z.object({
   FRONTEND_URL: z.string().url('FRONTEND_URL must be a valid URL').default('http://localhost:3000'),
   HOST: z.string().optional().default('0.0.0.0'),
   
-  // 支付配置 - 严格验证，确保生产环境的安全性
-  ALIPAY_APP_ID: z.string().min(1, 'ALIPAY_APP_ID is required'),
-  ALIPAY_APP_PRIVATE_KEY_PATH: z.string().min(1, 'ALIPAY_APP_PRIVATE_KEY_PATH is required'),
-  ALIPAY_PUBLIC_KEY_PATH: z.string().min(1, 'ALIPAY_PUBLIC_KEY_PATH is required'),
-  ALIPAY_NOTIFY_URL: z.string().url('ALIPAY_NOTIFY_URL must be a valid URL'),
+  // 支付配置 - 按需验证（生产或PAYMENT_ENABLED时必填）
+  PAYMENT_ENABLED: z.string().optional().default('false'),
+  ALIPAY_APP_ID: z.string().optional(),
+  ALIPAY_APP_PRIVATE_KEY_PATH: z.string().optional(),
+  ALIPAY_PUBLIC_KEY_PATH: z.string().optional(),
+  ALIPAY_NOTIFY_URL: z.string().optional(),
   
-  WECHAT_APP_ID: z.string().min(1, 'WECHAT_APP_ID is required'),
-  WECHAT_MCH_ID: z.string().min(1, 'WECHAT_MCH_ID is required'),
-  WECHAT_CERTIFICATE_SERIAL_NO: z.string().min(1, 'WECHAT_CERTIFICATE_SERIAL_NO is required'),
-  WECHAT_API_V3_KEY: z.string().min(32, 'WECHAT_API_V3_KEY must be at least 32 characters'),
-  WECHAT_NOTIFY_URL: z.string().url('WECHAT_NOTIFY_URL must be a valid URL'),
+  WECHAT_APP_ID: z.string().optional(),
+  WECHAT_MCH_ID: z.string().optional(),
+  WECHAT_CERTIFICATE_SERIAL_NO: z.string().optional(),
+  WECHAT_API_V3_KEY: z.string().optional(),
+  WECHAT_NOTIFY_URL: z.string().optional(),
   API_BASE_URL: z.string().url('API_BASE_URL must be a valid URL').default('http://localhost:8080'),
   
-  // 阿里云配置
-  ALIYUN_ACCESS_KEY_ID: z.string().min(1, 'ALIYUN_ACCESS_KEY_ID is required'),
-  ALIYUN_ACCESS_KEY_SECRET: z.string().min(1, 'ALIYUN_ACCESS_KEY_SECRET is required'),
-  ALIYUN_RAM_ROLE_ARN: z.string().min(1, 'ALIYUN_RAM_ROLE_ARN is required'),
+  // 阿里云配置（仅在ecs_oss_acr模式下必填）
+  ALIYUN_ACCESS_KEY_ID: z.string().optional(),
+  ALIYUN_ACCESS_KEY_SECRET: z.string().optional(),
+  ALIYUN_RAM_ROLE_ARN: z.string().optional(),
   ALIYUN_STS_REGION: z.string().default('cn-hangzhou'),
   
-  // OSS配置
+  // OSS配置（仅在ecs_oss_acr模式下必填）
   OSS_REGION: z.string().default('cn-hangzhou'),
-  OSS_BUCKET_USER_INPUT: z.string().min(1, 'OSS_BUCKET_USER_INPUT is required'),
-  OSS_BUCKET_JOB_RESULTS: z.string().min(1, 'OSS_BUCKET_JOB_RESULTS is required'),
-  OSS_BUCKET_JOB_LOGS: z.string().min(1, 'OSS_BUCKET_JOB_LOGS is required'),
+  OSS_BUCKET_USER_INPUT: z.string().optional(),
+  OSS_BUCKET_JOB_RESULTS: z.string().optional(),
+  OSS_BUCKET_JOB_LOGS: z.string().optional(),
   
   // Worker配置
   ECS_TOTAL_CPU: z.string().regex(/^\d+$/, 'ECS_TOTAL_CPU must be a number').default('8'),
@@ -114,6 +115,7 @@ const envSchema = z.object({
   TASK_MAX_RETRIES: z.string().regex(/^\d+$/, 'TASK_MAX_RETRIES must be a number').optional().default('3'),
   TASK_TIMEOUT: z.string().regex(/^\d+$/, 'TASK_TIMEOUT must be a number').optional().default('1800000'),
   TASK_POLLING_INTERVAL: z.string().regex(/^\d+$/, 'TASK_POLLING_INTERVAL must be a number').optional().default('3000'),
+  DRAFT_TASK_TIMEOUT_HOURS: z.string().regex(/^\d+$/, 'DRAFT_TASK_TIMEOUT_HOURS must be a number').optional().default('24'),
 
   // Docker 配置（可选）
   DOCKER_REGISTRY: z.string().optional().default('registry.cn-hangzhou.aliyuncs.com'),
@@ -146,8 +148,54 @@ const envSchema = z.object({
 const validateEnv = () => {
   try {
     const result = envSchema.parse(process.env);
+
+    // 条件校验：支付配置
+    const isPaymentRequired = result.PAYMENT_ENABLED === 'true' || result.NODE_ENV === 'production';
+    if (isPaymentRequired) {
+      const paymentMissing = [];
+      if (!result.ALIPAY_APP_ID) paymentMissing.push('ALIPAY_APP_ID');
+      if (!result.ALIPAY_APP_PRIVATE_KEY_PATH) paymentMissing.push('ALIPAY_APP_PRIVATE_KEY_PATH');
+      if (!result.ALIPAY_PUBLIC_KEY_PATH) paymentMissing.push('ALIPAY_PUBLIC_KEY_PATH');
+      if (!result.ALIPAY_NOTIFY_URL) paymentMissing.push('ALIPAY_NOTIFY_URL');
+      if (!result.WECHAT_APP_ID) paymentMissing.push('WECHAT_APP_ID');
+      if (!result.WECHAT_MCH_ID) paymentMissing.push('WECHAT_MCH_ID');
+      if (!result.WECHAT_CERTIFICATE_SERIAL_NO) paymentMissing.push('WECHAT_CERTIFICATE_SERIAL_NO');
+      if (!result.WECHAT_API_V3_KEY) paymentMissing.push('WECHAT_API_V3_KEY');
+      if (!result.WECHAT_NOTIFY_URL) paymentMissing.push('WECHAT_NOTIFY_URL');
+
+      if (paymentMissing.length > 0) {
+        throw new Error(`Payment config required but missing: ${paymentMissing.join(', ')}`);
+      }
+
+      // URL校验（仅在必填时）
+      const urlChecks = [
+        { key: 'ALIPAY_NOTIFY_URL', value: result.ALIPAY_NOTIFY_URL },
+        { key: 'WECHAT_NOTIFY_URL', value: result.WECHAT_NOTIFY_URL }
+      ];
+      for (const check of urlChecks) {
+        const parsed = z.string().url().safeParse(check.value);
+        if (!parsed.success) {
+          throw new Error(`${check.key} must be a valid URL`);
+        }
+      }
+    }
+
+    // 条件校验：ECS+OSS+ACR模式必须配置OSS/阿里云
+    if (result.DEPLOYMENT_MODE === 'ecs_oss_acr') {
+      const ossMissing = [];
+      if (!result.ALIYUN_ACCESS_KEY_ID) ossMissing.push('ALIYUN_ACCESS_KEY_ID');
+      if (!result.ALIYUN_ACCESS_KEY_SECRET) ossMissing.push('ALIYUN_ACCESS_KEY_SECRET');
+      if (!result.ALIYUN_RAM_ROLE_ARN) ossMissing.push('ALIYUN_RAM_ROLE_ARN');
+      if (!result.OSS_BUCKET_USER_INPUT) ossMissing.push('OSS_BUCKET_USER_INPUT');
+      if (!result.OSS_BUCKET_JOB_RESULTS) ossMissing.push('OSS_BUCKET_JOB_RESULTS');
+      if (!result.OSS_BUCKET_JOB_LOGS) ossMissing.push('OSS_BUCKET_JOB_LOGS');
+
+      if (ossMissing.length > 0) {
+        throw new Error(`OSS/ALiYun config required for ecs_oss_acr but missing: ${ossMissing.join(', ')}`);
+      }
+    }
     
-    // 转换数字类型
+  // 转换数字类型
     return {
       ...result,
       PORT: parseInt(result.PORT),
@@ -155,6 +203,8 @@ const validateEnv = () => {
       ECS_TOTAL_MEMORY_GB: parseInt(result.ECS_TOTAL_MEMORY_GB),
       JOB_CPU_REQUEST: parseInt(result.JOB_CPU_REQUEST),
       JOB_MEMORY_REQUEST_GB: parseInt(result.JOB_MEMORY_REQUEST_GB),
+    PAYMENT_ENABLED: result.PAYMENT_ENABLED === 'true',
+    DRAFT_TASK_TIMEOUT_HOURS: parseInt(result.DRAFT_TASK_TIMEOUT_HOURS)
     };
   } catch (error) {
     if (error instanceof z.ZodError) {
