@@ -55,6 +55,10 @@
 	
 	1. 客观透明: 必须客观、真实地报告任务的完成状态。明确指出已完成的工作、遇到的问题或任何潜在风险。杜绝想当然地认为任务已正确完成。
 
+### 4. git操作指导
+	1. 每次完成任务后，务必不要主动进行git相关操作；
+	2. 每次开发新功能、修复bug、测试和修改文档等工作，都必须检查切换到dev分支，不要在main分支修改任何代码和文档；
+	3. 项目开发方式是在dev分支进行开发测试，然后再merge到main分支，但是git操作必须follow第1条；
 
 ## 项目概述
 
@@ -448,6 +452,9 @@ docker exec -it app_redis_1 redis-cli MONITOR
 - `docs/tool_step_details.md` - 工具执行流程详解
 - `docs/unique_taskid_mechanism.md` - TaskID唯一性机制
 - `docs/task_rework_mechanism.md` - 任务重做机制
+- `docs/cmsgen_intg_prompt.md` - clkgen(cmsgen)工具集成的需求与要求说明
+- `docs/cmsgen_db_intg.md` - clkgen(cmsgen)数据库集成与改造分析（讨论确认稿）
+- `docs/cmsgen_full_intg_details.md` - clkgen(cmsgen)完整集成细节与操作过程
 
 ### 中间开发脚本
 位于`scripts/`目录，用来保存辅助项目开发的中间脚本，不能存放项目本身业务功能代码
@@ -464,6 +471,32 @@ docker exec -it app_redis_1 redis-cli MONITOR
 4. **环境变量检查**: 确保 `.env.local` 配置正确
 5. **端口占用**: 确保5432 (PostgreSQL)、6379 (Redis)、8080 (API)、3000 (Frontend) 端口可用
 6. **测试运行要求**：要求测试运行项目代码始终都在wsl2环境里，并使用wsl2环境里安装的chrome浏览器来测试，不要通过转发到windows来打开浏览器，直接在wsl2环境里测试运行项目的所有代码
+
+## clkgen (cmsgen) 工具集成约定
+
+将 `~/work/clkgen` 项目（在 LogicCore 内统一命名为 **cmsgen**）集成进 LogicCore，仅面向 **ECS Only 多页面交互**场景。
+集成以已落地的 **SDC/UPF 三页面工具**为 golden 参考。详细方案见 `docs/cmsgen_full_intg_details.md` 与 `docs/cmsgen_db_intg.md`。
+
+### 集成目标与原则（强制遵循）
+
+1. **绝不修改 SDC/UPF 既有前后端代码与目录结构**，原有工具业务逻辑原封不动保留。
+2. **增量集成**：遇到细节冲突，宁可新增独立文件，也不破坏既有工具逻辑。
+3. **业务独立**：cmsgen 与 SDC/UPF 是不同工具，工具本身业务代码完全独立，尽量不复用。
+4. **复用公共底座**：taskId 生成、Redis 队列、异步 worker、容器管理、下载/清理、鉴权/订阅/支付/后台等公共能力必须复用。
+5. **目录完全遵循 LogicCore**：clkgen 前后端代码与运行时数据目录（`jobs/`/`temp/`/`logs/`）一律落到 LogicCore 对应目录。
+6. **统一命名 cmsgen**；**统一使用 LogicCore 的 taskId 生成方式**（不沿用 clkgen 的 `CMS_*`）。
+7. 前端 Initialize/Submit 两页**拷贝过来但套 LogicCore 页面风格**；Download 页**必须与 SDC/UPF 完全一致、独立成页、仅工具名不同**（不使用 clkgen 自带下载页）。
+8. 引擎镜像制作**完全参考 `build_images/sdcgen`/`upfgen`** 流程，新建独立的 `build_images/cmsgen/`。
+9. `~/work/clkgen/templates/cmsgen/` 拷贝到 `templates/cmsgen/`，**不拷贝 `comcells/`**。
+10. 数据库**尽量少增表、最大复用**（参考 SDC/UPF 字段）。
+
+### 关键发现（决定集成方式的核心事实）
+
+1. **执行架构本质不同（最大改造点）**：clkgen 后端 `cmsgen.service.ts` 用 `child_process.spawn` 在 API 进程内**同步直接调 Python 引擎**，无 Docker、无队列、无 worker；LogicCore 是**异步 worker + Docker 容器 + Redis 队列**。必须把 clkgen 的 engine 管线（`cfg_adapter → graph_to_engine → cli_entry → 打包`）**整体封进 cmsgen 镜像**，由 worker 启动容器执行，API 仅负责 Initialize/编辑/提交/入队。
+2. **可编辑数据形态不同**：cmsgen 是**可视化画布**（`@xyflow/react` 节点 + `design.json`），与 SDC/UPF 的 Excel 网格表单完全不同，**不应套用 `Sheet/Table/TableData`**；画布以 `jobs/{taskId}/input/design.json` 文件为真源 + `Task.parameters` 镜像引用。
+3. **两个硬性不兼容点**：userId（clkgen `Int` vs LogicCore `String` cuid，改由 JWT 注入 String）、taskId（clkgen `CMS_*` vs LogicCore UUID v4，改用 TaskIdGenerator）。
+4. **前端缺依赖**：LogicCore 无 `@xyflow/react`、`dagre`，需增量引入；clkgen 用 `react-router-dom@6`、LogicCore 用 `@7`，拷贝页面后需核对路由/懒加载 API。既有 `ClkGeneratorPage.tsx` 仅为早期占位 demo，与本次集成无关，不复用不修改。
+5. **数据库 v1 零新增表**：cmsgen 复用 `Task`/`Tool`，把 clkgen `cms_projects` 元数据收敛进 `Task.parameters`（与 SDC/UPF 把 `modName`/`isFlat` 进 parameters 一致）；`cms_versions`/`cms_gen_logs`/`cms_lib_versions`/`cms_ai_chats` 均不迁移；删除 clkgen 服务里全部 `prisma.cms*` 落库逻辑与 `DB_ENABLED` 降级开关；仅 `db:seed` 新增一条 `toolType='cmsgen'` 的 Tool 记录。
 
 ## Browser Automation
 

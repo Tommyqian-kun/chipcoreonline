@@ -52,8 +52,8 @@ LogicCore/
 
 确保您的系统已安装：
 - Node.js (>= 18.0.0)
-- PostgreSQL (>= 13.0)
-- Redis (>= 6.0)
+- PostgreSQL (>= 17.0)
+- Redis (>= 7.4)
 
 ### 2. 安装依赖
 

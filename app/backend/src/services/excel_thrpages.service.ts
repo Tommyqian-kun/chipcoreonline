@@ -81,6 +81,8 @@ export interface ExcelAnalysisResult {
   totalTables: number;
 }
 
+type TableDataClient = Pick<typeof prisma, 'tableData'>;
+
 export class ExcelThrpagesService {
   // SDC工具的表格标识符和映射
   private static readonly SDC_TABLE_IDENTIFIERS = [
@@ -1426,7 +1428,7 @@ export class ExcelThrpagesService {
     sheetName: string,
     allTableNames: string[],
     toolType?: string,
-    db: typeof prisma = prisma
+    db: TableDataClient = prisma
   ): Promise<void> {
     safeLogToTaskFile(`📊 [EXCEL-PARSER] 开始解析表格: ${table.tableName}, tableId: ${table.id}, taskId: ${table.taskId || 'null'}`);
 
