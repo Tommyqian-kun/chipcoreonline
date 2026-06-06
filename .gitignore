@@ -13,7 +13,10 @@ dist/
 build/
 
 # IDE和编辑器
-.vscode/
+app/.vscode/
+app/.augment/
+app/.cursor/
+.claude/
 .idea/
 *.swp
 *.swo
@@ -28,14 +31,13 @@ build/
 .env.local
 .env.test
 .env.*.local
-# 但保留example模板文件
-!.env.test.example
-!app/backend/.env.test.example
+.env.example
+.env.test.example
+app/backend/.env.example
 app/backend/.env
 app/backend/.env.local
 app/backend/.env.test
-# 但保留example模板文件
-!app/backend/.env.test.example
+
 
 # 数据库文件
 *.db
@@ -45,14 +47,21 @@ prisma/migrations/
 
 # 临时文件
 *.tmp
+tmp/
 
 # 测试覆盖率
 coverage/
 .nyc_output/
 
 # 忽略整个目录
+docs/
 backups/
 scripts/
+templates/
+test_data/
+app/backend/src/tools/
+build_images/sdcgen/
+build_images/upfgen/
 
 # tests目录结构保留，但忽略测试结果和敏感配置
 # 测试代码和配置文件会被提交
@@ -65,9 +74,13 @@ tests/performance/logs/
 # 忽略docker大文件但保留目录结构
 docker/images/sdc/logiccore_sdc*
 docker/images/upf/logiccore_upf*
+docker/volumes/
 
 # OSS下载缓存
 /opt/logiccore/temp/
 
 # Docker相关
-docker-compose.override.yml
+app/docker-compose.yml
+app/docker-compose.prod.yml
+
+
