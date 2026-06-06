@@ -55,6 +55,7 @@ coverage/
 
 # 忽略整个目录
 docs/
+tests/
 backups/
 scripts/
 templates/
@@ -63,13 +64,7 @@ app/backend/src/tools/
 build_images/sdcgen/
 build_images/upfgen/
 
-# tests目录结构保留，但忽略测试结果和敏感配置
-# 测试代码和配置文件会被提交
-tests/e2e/screenshots/
-tests/e2e/test-results/
-tests/e2e/playwright-report/
-tests/e2e/.cache/
-tests/performance/logs/
+
 
 # 忽略docker大文件但保留目录结构
 docker/images/sdc/logiccore_sdc*
