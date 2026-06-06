@@ -4,6 +4,14 @@ ChipCore 是面向芯片后端实现工程师的在线 EDA 工具服务平台，
 
 当前开发和测试主线是 **ECS Only 部署模式 + 多页面交互工具**：用户在网页端上传设计输入，使用可视化表格或画布编辑数据，提交任务后由 Redis 队列、Worker 和 Docker 容器异步执行，最终在下载页获取结果。
 
+## 行业量产应用验证
+
+ChipCore 的定位是 SoC 芯片实现流程里的 EDA 基础设施，不是脱离业务场景的独立脚手架。项目中的 SDC/UPF 数据生成工具已在此前 7nm/5nm mobile SoC 项目中实际使用。
+
+上述芯片包含基带、NPU、CPU、GPU、DDR、MIPI 等复杂 IP 组成；在实现阶段，整个芯片的 all blocks、subsystems 和 top-only 场景都使用了本项目的 SDC 生成能力。最终 7nm 和 5nm 两颗芯片均实现量产。
+
+当前仓库中持续开发的工具，是上述已量产项目所用版本的进阶版本。后续会按开发进度逐步整理和分享更多能力。
+
 ## 项目重点
 
 - SDC 约束数据生成与检查：多页面 Excel-like 网页编辑流程。
@@ -23,6 +31,12 @@ ChipCore 是面向芯片后端实现工程师的在线 EDA 工具服务平台，
 | 任务执行 | Redis 队列 + Python Worker + Docker 容器 |
 | 当前开发模式 | ECS Only 本地文件存储 |
 | 暂非重点 | ECS+OSS+ACR 部署和单页面工具模式 |
+
+## 后续开发规划
+
+- SDC/UPF agent 自动化：在现有多页面流程和校验体系基础上，进一步增加 AI agent 驱动的数据自动生成能力，提升复杂约束和功耗意图数据的生成效率与一致性。
+- CMSGEN agent 自动化：CMSGEN（CLK 电路自动化生成）工具已完成开发，后续会与平台公共底座深度结合，逐步引入 agent 驱动自动化生成能力。
+- MERGED SDC 项目：针对大规模复杂 SoC 在 signoff 阶段面临的几百个 corner/scenarios/views 组合复杂度，MERGED SDC 方案用于显著压缩 signoff corner/scenarios/views 数量，并更高效、更精准地支持 timing ECO 收敛。
 
 ## 架构概览
 

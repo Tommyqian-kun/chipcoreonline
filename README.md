@@ -4,6 +4,14 @@ ChipCore is an online EDA tool service platform for chip back-end implementation
 
 The current development and testing focus is **ECS Only deployment + multi-page interactive tools**. Users upload design inputs in the browser, edit data through visual tables or canvases, submit tasks, and then retrieve generated results from the download page after asynchronous execution through Redis, Worker processes, and Docker containers.
 
+## Production-Proven Mobile SoC Applications
+
+ChipCore is positioned as EDA infrastructure inside the SoC implementation flow, not as a standalone demo framework. The SDC/UPF data generation tools in this project were previously used in real 7nm/5nm mobile SoC programs.
+
+Those chips included complex IPs such as baseband, NPU, CPU, GPU, DDR, and MIPI. During implementation, all blocks, subsystems, and top-only scenarios across the full chip used the SDC generation capability from this project. Both the 7nm and 5nm chips reached mass production successfully.
+
+The tools being developed in this repository are an evolved version of what was used in those shipped chip programs. More capabilities will be shared progressively based on development milestones.
+
 ## Project Focus
 
 - SDC constraint data generation and checking through a multi-page Excel-like web editing workflow.
@@ -23,6 +31,12 @@ These tools target real data problems in chip back-end development and complemen
 | Task execution | Redis queue + Python Worker + Docker container |
 | Current development mode | ECS Only local file storage |
 | Not the current focus | ECS+OSS+ACR deployment and single-page tool mode |
+
+## Development Roadmap
+
+- SDC/UPF agent automation: based on the existing multi-page workflow and validation system, we will further add AI agent-driven automated data generation to improve efficiency and consistency for complex constraint and power-intent data.
+- CMSGEN agent automation: the CMSGEN tool (automated CLK circuit generation) has already been developed, and it will progressively adopt agent-driven automated generation on top of the shared platform foundation.
+- MERGED SDC project: for large and complex SoCs that face hundreds of corner/scenarios/views combinations at signoff stage, the MERGED SDC approach is designed to significantly reduce signoff corner/scenarios/views volume and support timing ECO convergence with higher efficiency and precision.
 
 ## Architecture Overview
 
