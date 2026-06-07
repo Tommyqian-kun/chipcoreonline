@@ -1,4 +1,5 @@
 # ChipCore
+**Production-proven in real 7nm/5nm mobile SoC programs.** Open-source EDA infrastructure for SDC/UPF — intent-driven, not vendor rule-based.
 
 ChipCore is an online EDA tool service platform for chip back-end implementation engineers. It focuses on practical data generation, data checking, and flow collaboration problems in real SOC implementation work. This is not a generic demo application; it is built around real engineering needs such as efficient SDC/UPF generation and checking, CLK circuit data generation, and future CTS spec data generation.
 
