@@ -1,5 +1,5 @@
 # ChipCore
- **Open-source evolution of a chip back-end EDA toolchain used in 7nm/5nm mobile SoC mass production. Design Intent-driven, not vendor rule-based. Platform released first; tool kernels and pre-built Docker images to be published in subsequent releases.**
+ **Production-proven in real 7nm/5nm mobile SoC programs. Open-source evolution of a chip back-end EDA toolchain. Design Intent-driven, not vendor rule-based. Platform released first; tool kernels and pre-built Docker images to be published in subsequent releases.**
 
 ChipCore is an online EDA tool service platform for chip back-end implementation engineers. It focuses on practical data generation, data checking, and flow collaboration problems in real SOC implementation work. This is not a generic demo application; it is built around real engineering needs such as efficient SDC/UPF generation and checking, CLK circuit data generation, and future CTS spec data generation.
 
